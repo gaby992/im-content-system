@@ -43,7 +43,7 @@ Special rules: ${client.specialRules}
 Always write as if you are this practice speaking directly to their patients/clients. Reference the specific locations, services, and audience described above.`.trim();
 }
 
-export function createWordHtml(params: {
+export function createDocxHtml(params: {
   content: string;
   clientName: string;
   keyword: string;
@@ -56,39 +56,19 @@ export function createWordHtml(params: {
 <head>
 <meta charset="UTF-8">
 <style>
-  body {
-    font-family: Georgia, serif;
-    max-width: 860px;
-    margin: 0 auto;
-    padding: 40px;
-    color: #333;
-    line-height: 1.7;
-  }
-  .meta-box {
-    background: #f5f5f5;
-    border-left: 4px solid #C9A84C;
-    padding: 12px 16px;
-    margin-bottom: 32px;
-    font-family: Arial, sans-serif;
-    font-size: 13px;
-    color: #555;
-  }
-  .meta-box span { margin-right: 24px; }
-  h1 { color: #1B3A6B; border-bottom: 2px solid #C9A84C; padding-bottom: 8px; }
-  h2 { color: #1B3A6B; }
-  h3 { color: #2a5298; }
-  p { margin: 0 0 16px; }
-  ul, ol { margin: 0 0 16px; padding-left: 24px; }
-  li { margin-bottom: 6px; }
+  body { font-family: Calibri, Arial, sans-serif; }
+  h1 { font-size: 24pt; }
+  h2 { font-size: 18pt; }
+  h3 { font-size: 14pt; }
+  p { font-size: 11pt; line-height: 1.6; }
+  ul, ol { font-size: 11pt; }
+  .image-ideas { background: #f9f5e7; padding: 12px; margin-bottom: 16px; }
+  .image-ideas h2 { font-size: 14pt; color: #7a5c00; }
 </style>
 </head>
 <body>
-<div class="meta-box">
-  <span><strong>Client:</strong> ${clientName}</span>
-  <span><strong>Keyword:</strong> ${keyword}</span>
-  <span><strong>Version:</strong> ${version}</span>
-  <span><strong>Generated:</strong> ${date}</span>
-</div>
+<p><strong>Client:</strong> ${clientName} &nbsp;&nbsp; <strong>Keyword:</strong> ${keyword} &nbsp;&nbsp; <strong>Version:</strong> ${version} &nbsp;&nbsp; <strong>Generated:</strong> ${date}</p>
+<hr>
 ${content}
 </body>
 </html>`;

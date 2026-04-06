@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Client, ContentType, GeneratedContent, ContentVersion } from '@/types';
-import { slugify, createWordHtml, formatDate } from '@/lib/utils';
+import { slugify, createDocxHtml, formatDate } from '@/lib/utils';
 
 interface ContentGeneratorProps {
   user: { username: string; role: string };
@@ -11,7 +11,7 @@ const CONTENT_TYPES = [
   {
     id: 'blog-package' as ContentType,
     label: 'Blog Post Package',
-    description: 'Main blog 1500-2000w + 4x Web 2.0 posts + Drive version + GBP post',
+    description: 'Blog 1500-2000w + WordPress + Blogger + Tumblr + Medium + Weebly + Wix Blog (all 1000w) + Drive 750w + GBP Website Post 300w',
     icon: '📝',
   },
   {
@@ -26,24 +26,20 @@ const CONTENT_TYPES = [
     description: 'Geo-targeted location service page',
     icon: '📍',
   },
-  {
-    id: 'gbp-post' as ContentType,
-    label: 'GBP Post',
-    description: '300w Google Business Profile post',
-    icon: '📌',
-  },
 ];
 
 function getVersions(result: GeneratedContent): ContentVersion[] {
   if (result.type === 'blog-package') {
     const versions: ContentVersion[] = [];
-    if (result.blog) versions.push({ key: 'blog', label: 'Main Blog', content: result.blog, fileSlug: 'BLOG' });
-    if (result.web20_1) versions.push({ key: 'web20_1', label: 'Web 2.0 #1', content: result.web20_1, fileSlug: 'WEB20-1' });
-    if (result.web20_2) versions.push({ key: 'web20_2', label: 'Web 2.0 #2', content: result.web20_2, fileSlug: 'WEB20-2' });
-    if (result.web20_3) versions.push({ key: 'web20_3', label: 'Web 2.0 #3', content: result.web20_3, fileSlug: 'WEB20-3' });
-    if (result.web20_4) versions.push({ key: 'web20_4', label: 'Web 2.0 #4', content: result.web20_4, fileSlug: 'WEB20-4' });
-    if (result.drive) versions.push({ key: 'drive', label: 'Drive Version', content: result.drive, fileSlug: 'DRIVE' });
-    if (result.gbp) versions.push({ key: 'gbp', label: 'GBP Post', content: result.gbp, fileSlug: 'GBP' });
+    if (result.blog) versions.push({ key: 'blog', label: 'Blog Post', content: result.blog, fileSlug: 'BLOG' });
+    if (result.web20_1) versions.push({ key: 'web20_1', label: 'WordPress', content: result.web20_1, fileSlug: 'WORDPRESS' });
+    if (result.web20_2) versions.push({ key: 'web20_2', label: 'Blogger', content: result.web20_2, fileSlug: 'BLOGGER' });
+    if (result.web20_3) versions.push({ key: 'web20_3', label: 'Tumblr', content: result.web20_3, fileSlug: 'TUMBLR' });
+    if (result.web20_4) versions.push({ key: 'web20_4', label: 'Medium', content: result.web20_4, fileSlug: 'MEDIUM' });
+    if (result.web20_5) versions.push({ key: 'web20_5', label: 'Weebly', content: result.web20_5, fileSlug: 'WEEBLY' });
+    if (result.web20_6) versions.push({ key: 'web20_6', label: 'Wix Blog', content: result.web20_6, fileSlug: 'WIX' });
+    if (result.drive) versions.push({ key: 'drive', label: 'Google Drive', content: result.drive, fileSlug: 'DRIVE' });
+    if (result.gbp) versions.push({ key: 'gbp', label: 'GBP Website Post', content: result.gbp, fileSlug: 'GBP-WEBSITE' });
     return versions;
   }
   if (result.type === 'landing-page' && result.landingPage) {
@@ -52,18 +48,28 @@ function getVersions(result: GeneratedContent): ContentVersion[] {
   if (result.type === 'location-page' && result.locationPage) {
     return [{ key: 'location', label: 'Location Page', content: result.locationPage, fileSlug: 'LOCATION' }];
   }
-  if (result.type === 'gbp-post' && result.gbpPost) {
-    return [{ key: 'gbp', label: 'GBP Post', content: result.gbpPost, fileSlug: 'GBP' }];
-  }
   return [];
 }
 
-function downloadFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+async function generateDocxBlob(html: string, filename: string): Promise<Blob> {
+  const res = await fetch('/api/generate-docx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html, filename }),
+  });
+  if (!res.ok) throw new Error('Failed to generate .docx');
+  return res.blob();
+}
+
+async function downloadDocx(content: string, clientName: string, keyword: string, version: string, date: string, fileSlug: string) {
+  const slug = slugify(keyword);
+  const filename = `${slug}_${fileSlug}`;
+  const html = createDocxHtml({ content, clientName, keyword, version, date });
+  const blob = await generateDocxBlob(html, filename);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = `${filename}.docx`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -74,14 +80,17 @@ async function downloadAllAsZip(versions: ContentVersion[], keyword: string, cli
   const slug = slugify(keyword);
 
   for (const v of versions) {
-    const html = createWordHtml({
+    const filename = `${slug}_${v.fileSlug}`;
+    const html = createDocxHtml({
       content: v.content,
       clientName,
       keyword,
       version: v.label,
       date,
     });
-    zip.file(`${slug}_${v.fileSlug}.html`, html);
+    const blob = await generateDocxBlob(html, filename);
+    const arrayBuffer = await blob.arrayBuffer();
+    zip.file(`${filename}.docx`, arrayBuffer);
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });
@@ -105,6 +114,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
   const [activeKeywordTab, setActiveKeywordTab] = useState(0);
   const [activeVersionTab, setActiveVersionTab] = useState<Record<number, number>>({});
   const [step, setStep] = useState(1);
+  const [downloading, setDownloading] = useState(false);
 
   // Suppress unused variable warning — user prop reserved for future role-based UI
   void user;
@@ -181,14 +191,14 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           result.web20_2 = data.web20_2;
           result.web20_3 = data.web20_3;
           result.web20_4 = data.web20_4;
+          result.web20_5 = data.web20_5;
+          result.web20_6 = data.web20_6;
           result.drive = data.drive;
           result.gbp = data.gbp;
         } else if (contentType === 'landing-page') {
           result.landingPage = data.content;
         } else if (contentType === 'location-page') {
           result.locationPage = data.content;
-        } else if (contentType === 'gbp-post') {
-          result.gbpPost = data.content;
         }
 
         newResults.push(result);
@@ -422,15 +432,23 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                     <div className="flex items-center justify-between p-4 border-b border-gray-100">
                       <div>
                         <h3 className="font-semibold text-gray-900">{result.keyword}</h3>
-                        <p className="text-xs text-gray-400">{result.clientName} • {date}</p>
+                        <p className="text-xs text-gray-400">{result.clientName} • {date} • {versions.length} files</p>
                       </div>
                       {versions.length > 0 && (
                         <button
-                          onClick={() => downloadAllAsZip(versions, result.keyword, result.clientName, date)}
-                          className="px-4 py-2 text-sm text-white rounded-lg font-medium"
+                          onClick={async () => {
+                            setDownloading(true);
+                            try {
+                              await downloadAllAsZip(versions, result.keyword, result.clientName, date);
+                            } finally {
+                              setDownloading(false);
+                            }
+                          }}
+                          disabled={downloading}
+                          className="px-4 py-2 text-sm text-white rounded-lg font-medium disabled:opacity-60"
                           style={{ background: '#C9A84C' }}
                         >
-                          ⬇ Download All ZIP
+                          {downloading ? 'Building ZIP...' : '⬇ Download All .docx ZIP'}
                         </button>
                       )}
                     </div>
@@ -457,21 +475,18 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                         <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
                           <span className="text-xs text-gray-500 font-medium">{currentVersion.label}</span>
                           <button
-                            onClick={() => {
-                              const html = createWordHtml({
-                                content: currentVersion.content,
-                                clientName: result.clientName,
-                                keyword: result.keyword,
-                                version: currentVersion.label,
-                                date,
-                              });
-                              const slug = slugify(result.keyword);
-                              downloadFile(html, `${slug}_${currentVersion.fileSlug}.html`);
-                            }}
+                            onClick={() => downloadDocx(
+                              currentVersion.content,
+                              result.clientName,
+                              result.keyword,
+                              currentVersion.label,
+                              date,
+                              currentVersion.fileSlug,
+                            )}
                             className="text-xs px-3 py-1 rounded text-white"
                             style={{ background: '#1B3A6B' }}
                           >
-                            ⬇ Download HTML
+                            ⬇ Download .docx
                           </button>
                         </div>
                         <div
