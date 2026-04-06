@@ -1,3 +1,28 @@
+import { GeneratedContent, ContentVersion } from '@/types';
+
+export function getVersionsFromContent(result: GeneratedContent): ContentVersion[] {
+  if (result.type === 'blog-package') {
+    const versions: ContentVersion[] = [];
+    if (result.blog)    versions.push({ key: 'blog',    label: 'Blog Post',        content: result.blog,    fileSlug: 'BLOG' });
+    if (result.web20_1) versions.push({ key: 'web20_1', label: 'WordPress',         content: result.web20_1, fileSlug: 'WORDPRESS' });
+    if (result.web20_2) versions.push({ key: 'web20_2', label: 'Blogger',           content: result.web20_2, fileSlug: 'BLOGGER' });
+    if (result.web20_3) versions.push({ key: 'web20_3', label: 'Tumblr',            content: result.web20_3, fileSlug: 'TUMBLR' });
+    if (result.web20_4) versions.push({ key: 'web20_4', label: 'Medium',            content: result.web20_4, fileSlug: 'MEDIUM' });
+    if (result.web20_5) versions.push({ key: 'web20_5', label: 'Weebly',            content: result.web20_5, fileSlug: 'WEEBLY' });
+    if (result.web20_6) versions.push({ key: 'web20_6', label: 'Wix Blog',          content: result.web20_6, fileSlug: 'WIX' });
+    if (result.drive)   versions.push({ key: 'drive',   label: 'Google Drive',      content: result.drive,   fileSlug: 'DRIVE' });
+    if (result.gbp)     versions.push({ key: 'gbp',     label: 'GBP Website Post',  content: result.gbp,     fileSlug: 'GBP-WEBSITE' });
+    return versions;
+  }
+  if (result.type === 'landing-page' && result.landingPage) {
+    return [{ key: 'landing', label: 'Landing Page', content: result.landingPage, fileSlug: 'LANDING' }];
+  }
+  if (result.type === 'location-page' && result.locationPage) {
+    return [{ key: 'location', label: 'Location Page', content: result.locationPage, fileSlug: 'LOCATION' }];
+  }
+  return [];
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

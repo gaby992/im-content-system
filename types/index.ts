@@ -51,3 +51,7 @@ export interface ContentVersion {
   content: string;
   fileSlug: string;
 }
+
+export interface GenerationHistoryEntry extends GeneratedContent {
+  id: string;
+}

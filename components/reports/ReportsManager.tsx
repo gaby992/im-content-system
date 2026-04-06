@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { ReportFolder, User } from '@/types';
-import { generateId, formatDate } from '@/lib/utils';
+import { ReportFolder, User, GenerationHistoryEntry } from '@/types';
+import { generateId, formatDate, getVersionsFromContent } from '@/lib/utils';
+import { triggerDocxDownload, downloadAllAsZip } from '@/lib/docx-generator';
 
 interface ReportsManagerProps {
   user: User;
@@ -12,7 +13,164 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-export default function ReportsManager({ user }: ReportsManagerProps) {
+const CONTENT_TYPE_LABELS: Record<string, string> = {
+  'blog-package': 'Blog Package',
+  'landing-page': 'Landing Page',
+  'location-page': 'Location Page',
+};
+
+// ─── History Tab ─────────────────────────────────────────────────────────────
+
+function HistoryTab({ user }: { user: User }) {
+  const [history, setHistory] = useState<GenerationHistoryEntry[]>([]);
+  const [filterClient, setFilterClient] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [zippingId, setZippingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('im-generation-history');
+    if (stored) setHistory(JSON.parse(stored));
+  }, []);
+
+  function saveHistory(updated: GenerationHistoryEntry[]) {
+    setHistory(updated);
+    localStorage.setItem('im-generation-history', JSON.stringify(updated));
+  }
+
+  function handleDelete(id: string) {
+    saveHistory(history.filter(h => h.id !== id));
+    setDeleteConfirm(null);
+    if (expandedId === id) setExpandedId(null);
+  }
+
+  const canEdit = user.role === 'admin' || user.role === 'editor';
+
+  const uniqueClients = Array.from(new Set(history.map(h => h.clientName))).sort();
+
+  const filtered = history.filter(h => {
+    if (filterClient && h.clientName !== filterClient) return false;
+    return true;
+  });
+
+  if (history.length === 0) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+        <div className="text-5xl mb-4">📋</div>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">No generation history yet</h3>
+        <p className="text-sm text-gray-400">Every time you generate content it will appear here with re-download options.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Filter bar */}
+      <div className="flex gap-3 mb-4">
+        <select
+          value={filterClient}
+          onChange={e => setFilterClient(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+        >
+          <option value="">All clients</option>
+          {uniqueClients.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <span className="flex items-center text-xs text-gray-400">{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
+      </div>
+
+      <div className="space-y-3">
+        {filtered.map(entry => {
+          const versions = getVersionsFromContent(entry);
+          const date = formatDate(entry.generatedAt);
+          const isExpanded = expandedId === entry.id;
+
+          return (
+            <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              {/* Row header */}
+              <div className="flex items-center gap-3 px-4 py-3">
+                <button
+                  className="flex-1 flex items-center gap-3 text-left min-w-0"
+                  onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                >
+                  <span className="text-gray-400 text-xs">{isExpanded ? '▼' : '▶'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-gray-900 text-sm truncate">{entry.keyword}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{ background: '#1B3A6B' }}>
+                        {CONTENT_TYPE_LABELS[entry.type] ?? entry.type}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{versions.length} files</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">{entry.clientName} · {date}</div>
+                  </div>
+                </button>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* ZIP download */}
+                  <button
+                    onClick={async () => {
+                      setZippingId(entry.id);
+                      try { await downloadAllAsZip(versions, entry.keyword, entry.clientName, date); }
+                      catch (e) { alert('ZIP failed: ' + (e instanceof Error ? e.message : 'error')); }
+                      finally { setZippingId(null); }
+                    }}
+                    disabled={zippingId === entry.id || versions.length === 0}
+                    className="text-xs px-3 py-1.5 rounded-lg text-white font-medium disabled:opacity-50"
+                    style={{ background: '#C9A84C' }}
+                  >
+                    {zippingId === entry.id ? '...' : '⬇ ZIP'}
+                  </button>
+
+                  {/* Delete */}
+                  {canEdit && (
+                    deleteConfirm === entry.id ? (
+                      <div className="flex gap-1">
+                        <button onClick={() => handleDelete(entry.id)} className="text-xs px-2 py-1 rounded bg-red-500 text-white">Delete</button>
+                        <button onClick={() => setDeleteConfirm(null)} className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setDeleteConfirm(entry.id)} className="text-xs text-red-400 hover:text-red-600 px-1">×</button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              {/* Expanded: per-version download buttons */}
+              {isExpanded && versions.length > 0 && (
+                <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+                  <p className="text-xs text-gray-500 font-medium mb-2">Download individual files:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {versions.map(v => (
+                      <button
+                        key={v.key}
+                        onClick={async () => {
+                          try {
+                            await triggerDocxDownload(
+                              v.content,
+                              { clientName: entry.clientName, keyword: entry.keyword, version: v.label, date },
+                              v.fileSlug,
+                            );
+                          } catch (e) { alert('Download failed: ' + (e instanceof Error ? e.message : 'error')); }
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors"
+                      >
+                        ⬇ {v.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Folders Tab ──────────────────────────────────────────────────────────────
+
+function FoldersTab({ user }: { user: User }) {
   const [folders, setFolders] = useState<ReportFolder[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
@@ -61,24 +219,16 @@ export default function ReportsManager({ user }: ReportsManagerProps) {
   });
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500 text-sm mt-1">{folders.length} folder{folders.length !== 1 ? 's' : ''}</p>
-        </div>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm text-gray-500">{folders.length} folder{folders.length !== 1 ? 's' : ''}</span>
         {canEdit && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="px-5 py-2.5 rounded-lg text-white font-medium text-sm"
-            style={{ background: '#1B3A6B' }}
-          >
+          <button onClick={() => setShowForm(true)} className="px-4 py-2 rounded-lg text-white font-medium text-sm" style={{ background: '#1B3A6B' }}>
             + New Folder
           </button>
         )}
       </div>
 
-      {/* Create form modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
@@ -86,39 +236,26 @@ export default function ReportsManager({ user }: ReportsManagerProps) {
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
-                <select
-                  value={form.month}
-                  onChange={e => setForm(p => ({ ...p, month: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  required
-                >
+                <select value={form.month} onChange={e => setForm(p => ({ ...p, month: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" required>
                   <option value="">Select month</option>
                   {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Client Name</label>
-                <input
-                  value={form.clientName}
-                  onChange={e => setForm(p => ({ ...p, clientName: e.target.value }))}
+                <input value={form.clientName} onChange={e => setForm(p => ({ ...p, clientName: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  list="clients-datalist"
-                  required
-                  placeholder="Client name"
-                />
+                  list="clients-datalist" required placeholder="Client name" />
                 <datalist id="clients-datalist">
                   {clients.map(c => <option key={c.id} value={c.name} />)}
                 </datalist>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Topic / Service</label>
-                <input
-                  value={form.topic}
-                  onChange={e => setForm(p => ({ ...p, topic: e.target.value }))}
+                <input value={form.topic} onChange={e => setForm(p => ({ ...p, topic: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  required
-                  placeholder="e.g. Acne Treatment Blog Posts"
-                />
+                  required placeholder="e.g. Acne Treatment Blog Posts" />
               </div>
               <div className="flex gap-3 pt-1">
                 <button type="submit" className="px-5 py-2 rounded-lg text-white text-sm font-medium" style={{ background: '#1B3A6B' }}>Create</button>
@@ -129,27 +266,18 @@ export default function ReportsManager({ user }: ReportsManagerProps) {
         </div>
       )}
 
-      {/* Filters */}
       {folders.length > 0 && (
         <div className="flex gap-3 mb-4">
-          <select
-            value={filterMonth}
-            onChange={e => setFilterMonth(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-          >
+          <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="">All months</option>
             {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <input
-            value={filterClient}
-            onChange={e => setFilterClient(e.target.value)}
-            placeholder="Filter by client..."
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-          />
+          <input value={filterClient} onChange={e => setFilterClient(e.target.value)}
+            placeholder="Filter by client..." className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
         </div>
       )}
 
-      {/* Folders grid */}
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <div className="text-5xl mb-4">📁</div>
@@ -189,6 +317,45 @@ export default function ReportsManager({ user }: ReportsManagerProps) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Main Reports Page ────────────────────────────────────────────────────────
+
+export default function ReportsManager({ user }: ReportsManagerProps) {
+  const [activeTab, setActiveTab] = useState<'history' | 'folders'>('history');
+
+  return (
+    <div className="p-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
+        <p className="text-gray-500 text-sm mt-1">Generation history and report folders</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b border-gray-200">
+        {([
+          { id: 'history', label: '📋 History' },
+          { id: 'folders', label: '📁 Folders' },
+        ] as const).map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === tab.id
+                ? 'border-current'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            style={activeTab === tab.id ? { color: '#1B3A6B', borderColor: '#1B3A6B' } : {}}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'history' && <HistoryTab user={user} />}
+      {activeTab === 'folders' && <FoldersTab user={user} />}
     </div>
   );
 }

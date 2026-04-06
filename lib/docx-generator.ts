@@ -2,7 +2,11 @@
  * Client-side .docx generator using the `docx` npm package.
  * Uses the browser's built-in DOMParser to convert HTML content to Word paragraphs
  * with proper Heading 1 / Heading 2 / Heading 3 styles.
+ *
+ * Also exports shared download helpers used by ContentGenerator and ReportsManager.
  */
+import { slugify } from '@/lib/utils';
+import { ContentVersion } from '@/types';
 
 export interface DocxMetadata {
   clientName: string;
@@ -123,4 +127,49 @@ export async function generateDocxBlob(htmlContent: string, metadata: DocxMetada
   });
 
   return Packer.toBlob(docxDocument);
+}
+
+export async function triggerDocxDownload(
+  content: string,
+  metadata: DocxMetadata,
+  fileSlug: string,
+): Promise<void> {
+  const slug = slugify(metadata.keyword);
+  const filename = `${slug}_${fileSlug}.docx`;
+  const blob = await generateDocxBlob(content, metadata);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadAllAsZip(
+  versions: ContentVersion[],
+  keyword: string,
+  clientName: string,
+  date: string,
+): Promise<void> {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  const slug = slugify(keyword);
+
+  for (const v of versions) {
+    const blob = await generateDocxBlob(v.content, { clientName, keyword, version: v.label, date });
+    const arrayBuffer = await blob.arrayBuffer();
+    zip.file(`${slug}_${v.fileSlug}.docx`, arrayBuffer);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${slug}_package.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

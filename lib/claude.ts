@@ -38,8 +38,8 @@ IMAGE IDEAS RULE:
 </ul></div>
 - Image suggestions must be specific (not generic). Bad: "photo of a doctor". Good: "close-up of a dermatologist examining a patient's skin with a dermoscope under bright clinical lighting"
 
-FORBIDDEN WORDS (never use these):
-game-changer, cutting-edge, state-of-the-art, holistic approach, tailored solutions, seamlessly, robust, dive into, unlock, empower, journey, landscape, paradigm, revolutionize, groundbreaking, transformative, elevate, harness, streamline`;
+FORBIDDEN WORDS — never use these under any circumstance. If any of these appear in your draft, rewrite that sentence before returning the response:
+game-changer, cutting-edge, state-of-the-art, holistic approach, tailored solutions, seamlessly, robust, dive into, unlock, empower, journey, landscape, paradigm, revolutionize, groundbreaking, transformative, elevate, harness, streamline, delve, furthermore, moreover, in conclusion, in summary, it is worth noting, it is important to, in today's world, comprehensive, leverage, utilize, innovative, synergy, dynamic, impactful, life-changing, revolutionary, unprecedented`;
 
 export function buildPrompt(
   contentType: BuildContentType,
