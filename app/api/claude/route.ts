@@ -5,11 +5,12 @@ import { ContentType } from '@/types';
 
 export async function POST(request: Request) {
   try {
-    const { apiKey, contentType, keyword, clientSystemPrompt } = await request.json() as {
+    const { apiKey, contentType, keyword, clientSystemPrompt, blogPart } = await request.json() as {
       apiKey: string;
       contentType: ContentType;
       keyword: string;
       clientSystemPrompt: string;
+      blogPart?: 1 | 2;
     };
 
     if (!apiKey) {
@@ -21,7 +22,13 @@ export async function POST(request: Request) {
     }
 
     const client = new Anthropic({ apiKey });
-    const { systemPrompt, userPrompt, maxTokens } = buildPrompt(contentType, keyword, clientSystemPrompt);
+
+    // For blog-package, use split prompts to stay within the model's 8192 output token limit
+    const effectiveType = contentType === 'blog-package' && blogPart
+      ? (`blog-package-part${blogPart}` as const)
+      : contentType;
+
+    const { systemPrompt, userPrompt, maxTokens } = buildPrompt(effectiveType, keyword, clientSystemPrompt);
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',

@@ -1,4 +1,6 @@
-import { ContentType } from '@/types';
+// ContentType is used for the public API; buildPrompt also accepts internal part types
+import type { ContentType } from '@/types';
+type BuildContentType = ContentType | 'blog-package-part1' | 'blog-package-part2';
 
 export const MASTER_SYSTEM_PROMPT = `You are a warm, knowledgeable healthcare provider speaking directly to a patient — not a content writer, not a robot.
 
@@ -40,14 +42,14 @@ FORBIDDEN WORDS (never use these):
 game-changer, cutting-edge, state-of-the-art, holistic approach, tailored solutions, seamlessly, robust, dive into, unlock, empower, journey, landscape, paradigm, revolutionize, groundbreaking, transformative, elevate, harness, streamline`;
 
 export function buildPrompt(
-  contentType: ContentType,
+  contentType: BuildContentType,
   keyword: string,
   clientSystemPrompt: string
 ): { systemPrompt: string; userPrompt: string; maxTokens: number } {
   const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\n---\n\n${clientSystemPrompt}`;
 
-  if (contentType === 'blog-package') {
-    const userPrompt = `Create a complete Blog Post Package for the keyword: "${keyword}"
+  if (contentType === 'blog-package-part1') {
+    const userPrompt = `Create the FIRST HALF of a Blog Post Package for the keyword: "${keyword}"
 
 CRITICAL: Every single section below MUST:
 1. Start with the 📸 IMAGE IDEAS section (4 specific image suggestions) BEFORE any heading
@@ -72,22 +74,36 @@ Write a Blogger post (approximately 1000 words). Full HTML. Angle: myth-busting 
 
 ===TUMBLR_START===
 [Image Ideas section first, then:]
-Write a Tumblr post (approximately 1000 words). Full HTML. Angle: conversational Q&A style — "people ask us all the time about [keyword]" framing, address real questions patients have. Intro must mention "${keyword}" in first sentence. Younger, more casual tone. Different angle from all previous.
+Write a Tumblr post (approximately 1000 words). Full HTML. Angle: conversational Q&A style — "people ask us all the time about [topic]" framing, address real questions patients have. Intro must mention "${keyword}" in first sentence. Younger, more casual tone. Different angle from all previous.
 ===TUMBLR_END===
+
+IMPORTANT: Include ALL four sections with the exact separators shown above. Each section must have a unique angle, intro, and structure.`;
+
+    return { systemPrompt, userPrompt, maxTokens: 7500 };
+  }
+
+  if (contentType === 'blog-package-part2') {
+    const userPrompt = `Create the SECOND HALF of a Blog Post Package for the keyword: "${keyword}"
+
+CRITICAL: Every single section below MUST:
+1. Start with the 📸 IMAGE IDEAS section (4 specific image suggestions) BEFORE any heading
+2. Include the keyword "${keyword}" in the very FIRST sentence of the intro paragraph
+
+Generate ALL of the following pieces in order, using EXACTLY these separators:
 
 ===MEDIUM_START===
 [Image Ideas section first, then:]
-Write a Medium post (approximately 1000 words). Full HTML. Angle: thought-leadership or "what we've learned" — position as insider knowledge, lessons from clinical experience. Intro must mention "${keyword}" in first sentence. Thoughtful, slightly more professional tone. Different angle from all previous.
+Write a Medium post (approximately 1000 words). Full HTML. Angle: thought-leadership or "what we've learned" — position as insider knowledge, lessons from clinical experience. Intro must mention "${keyword}" in first sentence. Thoughtful, slightly more professional tone.
 ===MEDIUM_END===
 
 ===WEEBLY_START===
 [Image Ideas section first, then:]
-Write a Weebly post (approximately 1000 words). Full HTML. Angle: step-by-step guide or "what to expect" — walk the reader through the process, timeline, what happens at each stage. Intro must mention "${keyword}" in first sentence. Reassuring, informative tone. Different angle from all previous.
+Write a Weebly post (approximately 1000 words). Full HTML. Angle: step-by-step guide or "what to expect" — walk the reader through the process, timeline, what happens at each stage. Intro must mention "${keyword}" in first sentence. Reassuring, informative tone.
 ===WEEBLY_END===
 
 ===WIX_START===
 [Image Ideas section first, then:]
-Write a Wix Blog post (approximately 1000 words). Full HTML. Angle: comparison or "how is this different from" — compare this approach/treatment to alternatives or what patients tried before. Intro must mention "${keyword}" in first sentence. Helpful, educational tone. Different angle from all previous.
+Write a Wix Blog post (approximately 1000 words). Full HTML. Angle: comparison — compare this approach/treatment to alternatives or what patients tried before. Intro must mention "${keyword}" in first sentence. Helpful, educational tone.
 ===WIX_END===
 
 ===DRIVE_START===
@@ -97,12 +113,12 @@ Write a Google Drive version (approximately 750 words). Condensed, informative s
 
 ===GBP_START===
 [Image Ideas section first, then:]
-Write a GBP Website Post (approximately 300 words). Conversational, direct, warm. No complex HTML — just p tags. Speaks to the reader about "${keyword}" starting in the very first sentence. Ends with a soft, human call to action.
+Write a GBP Website Post (approximately 300 words). Conversational, direct, warm. Use only p tags. Speaks to the reader about "${keyword}" starting in the very first sentence. Ends with a soft, human call to action.
 ===GBP_END===
 
-IMPORTANT: Include ALL nine sections with the exact separators shown above. Every section must be unique — never duplicate structure, intro style, or content between sections.`;
+IMPORTANT: Include ALL five sections with the exact separators shown above. Each section must have a unique angle, intro, and structure.`;
 
-    return { systemPrompt, userPrompt, maxTokens: 16000 };
+    return { systemPrompt, userPrompt, maxTokens: 7500 };
   }
 
   if (contentType === 'landing-page') {

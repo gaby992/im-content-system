@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Client, ContentType, GeneratedContent, ContentVersion } from '@/types';
-import { slugify, createDocxHtml, formatDate } from '@/lib/utils';
+import { slugify, formatDate } from '@/lib/utils';
+import { generateDocxBlob } from '@/lib/docx-generator';
 
 interface ContentGeneratorProps {
   user: { username: string; role: string };
@@ -11,7 +12,7 @@ const CONTENT_TYPES = [
   {
     id: 'blog-package' as ContentType,
     label: 'Blog Post Package',
-    description: 'Blog 1500-2000w + WordPress + Blogger + Tumblr + Medium + Weebly + Wix Blog (all 1000w) + Drive 750w + GBP Website Post 300w',
+    description: 'Blog (1500-2000w) + WordPress, Blogger, Tumblr, Medium, Weebly, Wix Blog (each 1000w) + Google Drive (750w) + GBP Website Post (300w) — all as .docx',
     icon: '📝',
   },
   {
@@ -31,15 +32,15 @@ const CONTENT_TYPES = [
 function getVersions(result: GeneratedContent): ContentVersion[] {
   if (result.type === 'blog-package') {
     const versions: ContentVersion[] = [];
-    if (result.blog) versions.push({ key: 'blog', label: 'Blog Post', content: result.blog, fileSlug: 'BLOG' });
-    if (result.web20_1) versions.push({ key: 'web20_1', label: 'WordPress', content: result.web20_1, fileSlug: 'WORDPRESS' });
-    if (result.web20_2) versions.push({ key: 'web20_2', label: 'Blogger', content: result.web20_2, fileSlug: 'BLOGGER' });
-    if (result.web20_3) versions.push({ key: 'web20_3', label: 'Tumblr', content: result.web20_3, fileSlug: 'TUMBLR' });
-    if (result.web20_4) versions.push({ key: 'web20_4', label: 'Medium', content: result.web20_4, fileSlug: 'MEDIUM' });
-    if (result.web20_5) versions.push({ key: 'web20_5', label: 'Weebly', content: result.web20_5, fileSlug: 'WEEBLY' });
-    if (result.web20_6) versions.push({ key: 'web20_6', label: 'Wix Blog', content: result.web20_6, fileSlug: 'WIX' });
-    if (result.drive) versions.push({ key: 'drive', label: 'Google Drive', content: result.drive, fileSlug: 'DRIVE' });
-    if (result.gbp) versions.push({ key: 'gbp', label: 'GBP Website Post', content: result.gbp, fileSlug: 'GBP-WEBSITE' });
+    if (result.blog)    versions.push({ key: 'blog',    label: 'Blog Post',        content: result.blog,    fileSlug: 'BLOG' });
+    if (result.web20_1) versions.push({ key: 'web20_1', label: 'WordPress',         content: result.web20_1, fileSlug: 'WORDPRESS' });
+    if (result.web20_2) versions.push({ key: 'web20_2', label: 'Blogger',           content: result.web20_2, fileSlug: 'BLOGGER' });
+    if (result.web20_3) versions.push({ key: 'web20_3', label: 'Tumblr',            content: result.web20_3, fileSlug: 'TUMBLR' });
+    if (result.web20_4) versions.push({ key: 'web20_4', label: 'Medium',            content: result.web20_4, fileSlug: 'MEDIUM' });
+    if (result.web20_5) versions.push({ key: 'web20_5', label: 'Weebly',            content: result.web20_5, fileSlug: 'WEEBLY' });
+    if (result.web20_6) versions.push({ key: 'web20_6', label: 'Wix Blog',          content: result.web20_6, fileSlug: 'WIX' });
+    if (result.drive)   versions.push({ key: 'drive',   label: 'Google Drive',      content: result.drive,   fileSlug: 'DRIVE' });
+    if (result.gbp)     versions.push({ key: 'gbp',     label: 'GBP Website Post',  content: result.gbp,     fileSlug: 'GBP-WEBSITE' });
     return versions;
   }
   if (result.type === 'landing-page' && result.landingPage) {
@@ -51,26 +52,21 @@ function getVersions(result: GeneratedContent): ContentVersion[] {
   return [];
 }
 
-async function generateDocxBlob(html: string, filename: string): Promise<Blob> {
-  const res = await fetch('/api/generate-docx', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ html, filename }),
-  });
-  if (!res.ok) throw new Error('Failed to generate .docx');
-  return res.blob();
-}
-
-async function downloadDocx(content: string, clientName: string, keyword: string, version: string, date: string, fileSlug: string) {
-  const slug = slugify(keyword);
-  const filename = `${slug}_${fileSlug}`;
-  const html = createDocxHtml({ content, clientName, keyword, version, date });
-  const blob = await generateDocxBlob(html, filename);
+async function triggerDocxDownload(
+  content: string,
+  metadata: { clientName: string; keyword: string; version: string; date: string },
+  fileSlug: string
+) {
+  const slug = slugify(metadata.keyword);
+  const filename = `${slug}_${fileSlug}.docx`;
+  const blob = await generateDocxBlob(content, metadata);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${filename}.docx`;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
@@ -80,26 +76,38 @@ async function downloadAllAsZip(versions: ContentVersion[], keyword: string, cli
   const slug = slugify(keyword);
 
   for (const v of versions) {
-    const filename = `${slug}_${v.fileSlug}`;
-    const html = createDocxHtml({
-      content: v.content,
-      clientName,
-      keyword,
-      version: v.label,
-      date,
-    });
-    const blob = await generateDocxBlob(html, filename);
+    const metadata = { clientName, keyword, version: v.label, date };
+    const blob = await generateDocxBlob(v.content, metadata);
     const arrayBuffer = await blob.arrayBuffer();
-    zip.file(`${filename}.docx`, arrayBuffer);
+    zip.file(`${slug}_${v.fileSlug}.docx`, arrayBuffer);
   }
 
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(blob);
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
   const a = document.createElement('a');
   a.href = url;
   a.download = `${slug}_package.zip`;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+async function callClaudeAPI(payload: {
+  apiKey: string;
+  contentType: ContentType;
+  keyword: string;
+  clientSystemPrompt: string;
+  blogPart?: 1 | 2;
+}) {
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Generation failed');
+  return data;
 }
 
 export default function ContentGenerator({ user }: ContentGeneratorProps) {
@@ -109,14 +117,13 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
   const [keywords, setKeywords] = useState<string[]>(['']);
   const [results, setResults] = useState<GeneratedContent[]>([]);
   const [generating, setGenerating] = useState(false);
-  const [generatingKeyword, setGeneratingKeyword] = useState('');
+  const [generatingStatus, setGeneratingStatus] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activeKeywordTab, setActiveKeywordTab] = useState(0);
   const [activeVersionTab, setActiveVersionTab] = useState<Record<number, number>>({});
   const [step, setStep] = useState(1);
-  const [downloading, setDownloading] = useState(false);
+  const [zipping, setZipping] = useState(false);
 
-  // Suppress unused variable warning — user prop reserved for future role-based UI
   void user;
 
   useEffect(() => {
@@ -124,27 +131,14 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     if (stored) setClients(JSON.parse(stored));
   }, []);
 
-  function addKeyword() {
-    setKeywords(prev => [...prev, '']);
-  }
-
-  function updateKeyword(idx: number, value: string) {
-    setKeywords(prev => prev.map((k, i) => i === idx ? value : k));
-  }
-
-  function removeKeyword(idx: number) {
-    if (keywords.length === 1) return;
-    setKeywords(prev => prev.filter((_, i) => i !== idx));
-  }
+  function addKeyword() { setKeywords(prev => [...prev, '']); }
+  function updateKeyword(idx: number, value: string) { setKeywords(prev => prev.map((k, i) => i === idx ? value : k)); }
+  function removeKeyword(idx: number) { if (keywords.length > 1) setKeywords(prev => prev.filter((_, i) => i !== idx)); }
 
   async function handleGenerate() {
     if (!selectedClient) return;
-
     const apiKey = localStorage.getItem('im-api-key') || '';
-    if (!apiKey) {
-      alert('Please add your Claude API key in Settings first.');
-      return;
-    }
+    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
 
     const validKeywords = keywords.filter(k => k.trim());
     if (validKeywords.length === 0) return;
@@ -156,28 +150,10 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
 
     const newResults: GeneratedContent[] = [];
     const newErrors: Record<string, string> = {};
+    const clientSystemPrompt = selectedClient.systemPrompt || `You are creating content for ${selectedClient.name}, a ${selectedClient.niche} business.`;
 
     for (const keyword of validKeywords) {
-      setGeneratingKeyword(keyword);
       try {
-        const res = await fetch('/api/claude', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            apiKey,
-            contentType,
-            keyword,
-            clientSystemPrompt: selectedClient.systemPrompt || `You are creating content for ${selectedClient.name}, a ${selectedClient.niche} business.`,
-          }),
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-          newErrors[keyword] = data.error || 'Generation failed';
-          continue;
-        }
-
         const result: GeneratedContent = {
           keyword,
           type: contentType,
@@ -186,44 +162,47 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
         };
 
         if (contentType === 'blog-package') {
-          result.blog = data.blog;
-          result.web20_1 = data.web20_1;
-          result.web20_2 = data.web20_2;
-          result.web20_3 = data.web20_3;
-          result.web20_4 = data.web20_4;
-          result.web20_5 = data.web20_5;
-          result.web20_6 = data.web20_6;
-          result.drive = data.drive;
-          result.gbp = data.gbp;
-        } else if (contentType === 'landing-page') {
-          result.landingPage = data.content;
-        } else if (contentType === 'location-page') {
-          result.locationPage = data.content;
+          // Split into two API calls to stay within the model's 8192 output token limit
+          setGeneratingStatus(`Generating "${keyword}" — Part 1 of 2 (Blog + WordPress + Blogger + Tumblr)...`);
+          const part1 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 1 });
+          result.blog    = part1.blog;
+          result.web20_1 = part1.web20_1;
+          result.web20_2 = part1.web20_2;
+          result.web20_3 = part1.web20_3;
+
+          setGeneratingStatus(`Generating "${keyword}" — Part 2 of 2 (Medium + Weebly + Wix + Drive + GBP)...`);
+          const part2 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 2 });
+          result.web20_4 = part2.web20_4;
+          result.web20_5 = part2.web20_5;
+          result.web20_6 = part2.web20_6;
+          result.drive   = part2.drive;
+          result.gbp     = part2.gbp;
+        } else {
+          setGeneratingStatus(`Generating "${keyword}"...`);
+          const data = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt });
+          if (contentType === 'landing-page') result.landingPage = data.content;
+          if (contentType === 'location-page') result.locationPage = data.content;
         }
 
         newResults.push(result);
-      } catch {
-        newErrors[keyword] = 'Network error. Please try again.';
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Network error. Please try again.';
+        newErrors[keyword] = msg;
       }
     }
 
     setResults(newResults);
     setErrors(newErrors);
     setGenerating(false);
-    setGeneratingKeyword('');
+    setGeneratingStatus('');
     setActiveKeywordTab(0);
   }
 
   function resetForm() {
-    setStep(1);
-    setResults([]);
-    setErrors({});
-    setKeywords(['']);
-    setSelectedClient(null);
-    setContentType('blog-package');
+    setStep(1); setResults([]); setErrors({}); setKeywords(['']);
+    setSelectedClient(null); setContentType('blog-package');
   }
 
-  // Step indicators
   const steps = [
     { n: 1, label: 'Client' },
     { n: 2, label: 'Content Type' },
@@ -239,10 +218,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           <p className="text-gray-500 text-sm mt-1">Generate SEO content powered by Claude AI</p>
         </div>
         {step === 4 && !generating && (
-          <button
-            onClick={resetForm}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
-          >
+          <button onClick={resetForm} className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">
             ← New Generation
           </button>
         )}
@@ -283,7 +259,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                   <button
                     key={client.id}
                     onClick={() => { setSelectedClient(client); setStep(2); }}
-                    className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all`}
+                    className="w-full text-left px-4 py-3 rounded-lg border-2 transition-all"
                     style={selectedClient?.id === client.id ? { borderColor: '#1B3A6B', background: '#f0f4ff' } : { borderColor: '#e5e7eb' }}
                   >
                     <div className="font-medium text-gray-900">{client.name}</div>
@@ -306,7 +282,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                 <button
                   key={ct.id}
                   onClick={() => setContentType(ct.id)}
-                  className={`w-full text-left px-4 py-4 rounded-lg border-2 transition-all`}
+                  className="w-full text-left px-4 py-4 rounded-lg border-2 transition-all"
                   style={contentType === ct.id ? { borderColor: '#1B3A6B', background: '#f0f4ff' } : { borderColor: '#e5e7eb' }}
                 >
                   <div className="flex items-start gap-3">
@@ -324,9 +300,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setStep(1)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Back</button>
-              <button onClick={() => setStep(3)} className="px-5 py-2 text-sm text-white rounded-lg" style={{ background: '#1B3A6B' }}>
-                Continue →
-              </button>
+              <button onClick={() => setStep(3)} className="px-5 py-2 text-sm text-white rounded-lg" style={{ background: '#1B3A6B' }}>Continue →</button>
             </div>
           </div>
         </div>
@@ -338,7 +312,6 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <h2 className="font-semibold text-gray-900 mb-1">Step 3: Add Keywords</h2>
             <p className="text-sm text-gray-500 mb-4">Each keyword generates a full {CONTENT_TYPES.find(ct => ct.id === contentType)?.label}.</p>
-
             <div className="space-y-2 mb-4">
               {keywords.map((kw, idx) => (
                 <div key={idx} className="flex gap-2">
@@ -354,19 +327,12 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                 </div>
               ))}
             </div>
-
-            <button
-              onClick={addKeyword}
-              className="text-sm mb-4 flex items-center gap-1 hover:underline"
-              style={{ color: '#1B3A6B' }}
-            >
+            <button onClick={addKeyword} className="text-sm mb-4 flex items-center gap-1 hover:underline" style={{ color: '#1B3A6B' }}>
               + Add another keyword
             </button>
-
             <div className="bg-gray-50 rounded-lg p-3 mb-5 text-xs text-gray-500">
               <strong>Client:</strong> {selectedClient?.name} &nbsp;•&nbsp; <strong>Type:</strong> {CONTENT_TYPES.find(ct => ct.id === contentType)?.label}
             </div>
-
             <div className="flex gap-3">
               <button onClick={() => setStep(2)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50">← Back</button>
               <button
@@ -388,8 +354,8 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           {generating && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
               <div className="animate-spin w-12 h-12 border-4 border-blue-200 rounded-full mx-auto mb-4" style={{ borderTopColor: '#1B3A6B' }} />
-              <p className="text-gray-700 font-medium">Generating content for: <span className="font-bold" style={{ color: '#1B3A6B' }}>{generatingKeyword}</span></p>
-              <p className="text-gray-400 text-sm mt-2">This may take a moment for the full blog package...</p>
+              <p className="text-gray-700 font-medium text-sm">{generatingStatus}</p>
+              <p className="text-gray-400 text-xs mt-2">Blog packages use 2 API calls to generate all 9 files.</p>
             </div>
           )}
 
@@ -402,7 +368,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                     <button
                       key={i}
                       onClick={() => setActiveKeywordTab(i)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all`}
+                      className="px-4 py-2 rounded-lg text-sm font-medium border transition-all"
                       style={activeKeywordTab === i ? { background: '#1B3A6B', color: 'white', borderColor: '#1B3A6B' } : { borderColor: '#e5e7eb', color: '#374151' }}
                     >
                       {r.keyword}
@@ -425,6 +391,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                 const activeVersion = activeVersionTab[activeKeywordTab] ?? 0;
                 const currentVersion = versions[activeVersion];
                 const date = formatDate(result.generatedAt);
+                const metadata = { clientName: result.clientName, keyword: result.keyword, version: currentVersion?.label ?? '', date };
 
                 return (
                   <div className="bg-white rounded-xl shadow-sm border border-gray-100">
@@ -432,23 +399,25 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                     <div className="flex items-center justify-between p-4 border-b border-gray-100">
                       <div>
                         <h3 className="font-semibold text-gray-900">{result.keyword}</h3>
-                        <p className="text-xs text-gray-400">{result.clientName} • {date} • {versions.length} files</p>
+                        <p className="text-xs text-gray-400">{result.clientName} • {date} • {versions.length} files ready</p>
                       </div>
                       {versions.length > 0 && (
                         <button
                           onClick={async () => {
-                            setDownloading(true);
+                            setZipping(true);
                             try {
                               await downloadAllAsZip(versions, result.keyword, result.clientName, date);
+                            } catch (e) {
+                              alert('ZIP download failed: ' + (e instanceof Error ? e.message : 'Unknown error'));
                             } finally {
-                              setDownloading(false);
+                              setZipping(false);
                             }
                           }}
-                          disabled={downloading}
+                          disabled={zipping}
                           className="px-4 py-2 text-sm text-white rounded-lg font-medium disabled:opacity-60"
                           style={{ background: '#C9A84C' }}
                         >
-                          {downloading ? 'Building ZIP...' : '⬇ Download All .docx ZIP'}
+                          {zipping ? 'Building ZIP...' : `⬇ Download All ${versions.length} .docx ZIP`}
                         </button>
                       )}
                     </div>
@@ -460,7 +429,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                           <button
                             key={v.key}
                             onClick={() => setActiveVersionTab(prev => ({ ...prev, [activeKeywordTab]: vi }))}
-                            className={`px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-all`}
+                            className="px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap transition-all"
                             style={activeVersion === vi ? { background: '#1B3A6B', color: 'white' } : { background: '#f3f4f6', color: '#6b7280' }}
                           >
                             {v.label}
@@ -469,20 +438,23 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                       </div>
                     )}
 
-                    {/* Content viewer + download */}
+                    {/* Content viewer + individual download */}
                     {currentVersion && (
                       <div>
                         <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100">
                           <span className="text-xs text-gray-500 font-medium">{currentVersion.label}</span>
                           <button
-                            onClick={() => downloadDocx(
-                              currentVersion.content,
-                              result.clientName,
-                              result.keyword,
-                              currentVersion.label,
-                              date,
-                              currentVersion.fileSlug,
-                            )}
+                            onClick={async () => {
+                              try {
+                                await triggerDocxDownload(
+                                  currentVersion.content,
+                                  { ...metadata, version: currentVersion.label },
+                                  currentVersion.fileSlug,
+                                );
+                              } catch (e) {
+                                alert('Download failed: ' + (e instanceof Error ? e.message : 'Unknown error'));
+                              }
+                            }}
                             className="text-xs px-3 py-1 rounded text-white"
                             style={{ background: '#1B3A6B' }}
                           >
