@@ -4,6 +4,38 @@ import { ReportFolder, User, GenerationHistoryEntry } from '@/types';
 import { generateId, formatDate, getVersionsFromContent } from '@/lib/utils';
 import { triggerDocxDownload, downloadAllAsZip } from '@/lib/docx-generator';
 
+const ALL_BLOG_VERSIONS: { key: keyof GenerationHistoryEntry; label: string; part: 1 | 2 }[] = [
+  { key: 'blog',    label: 'Blog Post',        part: 1 },
+  { key: 'web20_1', label: 'WordPress',         part: 1 },
+  { key: 'web20_2', label: 'Blogger',           part: 1 },
+  { key: 'web20_3', label: 'Tumblr',            part: 1 },
+  { key: 'web20_4', label: 'Medium',            part: 2 },
+  { key: 'web20_5', label: 'Weebly',            part: 2 },
+  { key: 'web20_6', label: 'Wix Blog',          part: 2 },
+  { key: 'drive',   label: 'Google Drive',      part: 2 },
+  { key: 'gbp',     label: 'GBP Website Post',  part: 2 },
+];
+
+const PART1_KEYS: (keyof GenerationHistoryEntry)[] = ['blog', 'web20_1', 'web20_2', 'web20_3'];
+const PART2_KEYS: (keyof GenerationHistoryEntry)[] = ['web20_4', 'web20_5', 'web20_6', 'drive', 'gbp'];
+
+async function callClaudeAPI(payload: {
+  apiKey: string;
+  contentType: string;
+  keyword: string;
+  clientSystemPrompt: string;
+  blogPart?: 1 | 2;
+}) {
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Generation failed');
+  return data;
+}
+
 interface ReportsManagerProps {
   user: User;
 }
@@ -23,14 +55,20 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 
 function HistoryTab({ user }: { user: User }) {
   const [history, setHistory] = useState<GenerationHistoryEntry[]>([]);
+  const [clients, setClients] = useState<{ id: string; name: string; niche: string; systemPrompt: string }[]>([]);
   const [filterClient, setFilterClient] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [zippingId, setZippingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [regenStatus, setRegenStatus] = useState('');
+  const [addVersionModal, setAddVersionModal] = useState<string | null>(null); // entry id
 
   useEffect(() => {
     const stored = localStorage.getItem('im-generation-history');
     if (stored) setHistory(JSON.parse(stored));
+    const storedClients = localStorage.getItem('im-clients');
+    if (storedClients) setClients(JSON.parse(storedClients));
   }, []);
 
   function saveHistory(updated: GenerationHistoryEntry[]) {
@@ -42,6 +80,90 @@ function HistoryTab({ user }: { user: User }) {
     saveHistory(history.filter(h => h.id !== id));
     setDeleteConfirm(null);
     if (expandedId === id) setExpandedId(null);
+  }
+
+  function getClientPrompt(clientName: string): string {
+    const client = clients.find(c => c.name === clientName);
+    if (!client) throw new Error(`Client "${clientName}" not found. Please ensure the client still exists in Clients.`);
+    return client.systemPrompt || `You are creating content for ${client.name}, a ${client.niche} business.`;
+  }
+
+  async function handleRegenerate(entry: GenerationHistoryEntry, mode: 'missing' | 'all') {
+    const apiKey = localStorage.getItem('im-api-key') || '';
+    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
+
+    let clientSystemPrompt: string;
+    try { clientSystemPrompt = getClientPrompt(entry.clientName); }
+    catch (err) { alert(err instanceof Error ? err.message : 'Client not found'); return; }
+
+    setRegeneratingId(entry.id);
+    const updatedEntry = { ...entry };
+
+    const needPart1 = mode === 'all' || PART1_KEYS.some(k => !entry[k]);
+    const needPart2 = mode === 'all' || PART2_KEYS.some(k => !entry[k]);
+
+    try {
+      if (needPart1) {
+        setRegenStatus('Regenerating Part 1 of 2... (Blog, WordPress, Blogger, Tumblr)');
+        const part1 = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 1 });
+        if (mode === 'all' || !updatedEntry.blog)    updatedEntry.blog    = part1.blog    ?? updatedEntry.blog;
+        if (mode === 'all' || !updatedEntry.web20_1) updatedEntry.web20_1 = part1.web20_1 ?? updatedEntry.web20_1;
+        if (mode === 'all' || !updatedEntry.web20_2) updatedEntry.web20_2 = part1.web20_2 ?? updatedEntry.web20_2;
+        if (mode === 'all' || !updatedEntry.web20_3) updatedEntry.web20_3 = part1.web20_3 ?? updatedEntry.web20_3;
+      }
+      if (needPart2) {
+        setRegenStatus('Regenerating Part 2 of 2... (Medium, Weebly, Wix, Drive, GBP)');
+        const part2 = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 2 });
+        if (mode === 'all' || !updatedEntry.web20_4) updatedEntry.web20_4 = part2.web20_4 ?? updatedEntry.web20_4;
+        if (mode === 'all' || !updatedEntry.web20_5) updatedEntry.web20_5 = part2.web20_5 ?? updatedEntry.web20_5;
+        if (mode === 'all' || !updatedEntry.web20_6) updatedEntry.web20_6 = part2.web20_6 ?? updatedEntry.web20_6;
+        if (mode === 'all' || !updatedEntry.drive)   updatedEntry.drive   = part2.drive   ?? updatedEntry.drive;
+        if (mode === 'all' || !updatedEntry.gbp)     updatedEntry.gbp     = part2.gbp     ?? updatedEntry.gbp;
+      }
+      updatedEntry.generatedAt = new Date().toISOString();
+      saveHistory(history.map(h => h.id === entry.id ? updatedEntry : h));
+    } catch (err) {
+      alert(`Regeneration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setRegeneratingId(null);
+      setRegenStatus('');
+    }
+  }
+
+  async function handleAddVersion(entry: GenerationHistoryEntry, versionKey: keyof GenerationHistoryEntry) {
+    const apiKey = localStorage.getItem('im-api-key') || '';
+    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
+
+    let clientSystemPrompt: string;
+    try { clientSystemPrompt = getClientPrompt(entry.clientName); }
+    catch (err) { alert(err instanceof Error ? err.message : 'Client not found'); return; }
+
+    const versionInfo = ALL_BLOG_VERSIONS.find(v => v.key === versionKey);
+    if (!versionInfo) return;
+
+    setRegeneratingId(entry.id);
+    setRegenStatus(`Generating ${versionInfo.label}...`);
+
+    try {
+      const data = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: versionInfo.part });
+      const updatedEntry = { ...entry };
+      // Only save the specifically requested version
+      if (versionKey === 'blog'    && data.blog)    updatedEntry.blog    = data.blog;
+      if (versionKey === 'web20_1' && data.web20_1) updatedEntry.web20_1 = data.web20_1;
+      if (versionKey === 'web20_2' && data.web20_2) updatedEntry.web20_2 = data.web20_2;
+      if (versionKey === 'web20_3' && data.web20_3) updatedEntry.web20_3 = data.web20_3;
+      if (versionKey === 'web20_4' && data.web20_4) updatedEntry.web20_4 = data.web20_4;
+      if (versionKey === 'web20_5' && data.web20_5) updatedEntry.web20_5 = data.web20_5;
+      if (versionKey === 'web20_6' && data.web20_6) updatedEntry.web20_6 = data.web20_6;
+      if (versionKey === 'drive'   && data.drive)   updatedEntry.drive   = data.drive;
+      if (versionKey === 'gbp'     && data.gbp)     updatedEntry.gbp     = data.gbp;
+      saveHistory(history.map(h => h.id === entry.id ? updatedEntry : h));
+    } catch (err) {
+      alert(`Failed to generate ${versionInfo.label}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setRegeneratingId(null);
+      setRegenStatus('');
+    }
   }
 
   const canEdit = user.role === 'admin' || user.role === 'editor';
@@ -78,11 +200,63 @@ function HistoryTab({ user }: { user: User }) {
         <span className="flex items-center text-xs text-gray-400">{filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}</span>
       </div>
 
+      {/* Add Version modal */}
+      {addVersionModal && (() => {
+        const entry = history.find(h => h.id === addVersionModal);
+        if (!entry) return null;
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+              <h2 className="font-semibold text-gray-900 mb-1">Add / Regenerate a Version</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Keyword: <strong>{entry.keyword}</strong>
+                <br /><span className="text-xs">Click a version to generate it. Existing versions (✓) will be regenerated fresh.</span>
+              </p>
+              {regeneratingId === entry.id ? (
+                <div className="text-center py-6">
+                  <div className="animate-spin w-8 h-8 border-4 border-blue-200 rounded-full mx-auto mb-3" style={{ borderTopColor: '#1B3A6B' }} />
+                  <p className="text-sm text-gray-600">{regenStatus}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {ALL_BLOG_VERSIONS.map(v => {
+                    const exists = !!entry[v.key];
+                    return (
+                      <button
+                        key={v.key as string}
+                        onClick={() => handleAddVersion(entry, v.key)}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border-2 transition-all text-left ${
+                          exists
+                            ? 'border-green-200 bg-green-50 text-green-700 hover:border-green-400'
+                            : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
+                        }`}
+                      >
+                        {exists ? '✓ ' : '+ '}{v.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                onClick={() => setAddVersionModal(null)}
+                disabled={regeneratingId === entry.id}
+                className="mt-4 px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="space-y-3">
         {filtered.map(entry => {
           const versions = getVersionsFromContent(entry);
           const date = formatDate(entry.generatedAt);
           const isExpanded = expandedId === entry.id;
+          const totalExpected = entry.type === 'blog-package' ? 9 : 1;
+          const hasMissingVersions = entry.type === 'blog-package' && versions.length < 9;
+          const isRegenerating = regeneratingId === entry.id;
 
           return (
             <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -99,7 +273,11 @@ function HistoryTab({ user }: { user: User }) {
                       <span className="text-xs px-2 py-0.5 rounded-full text-white font-medium" style={{ background: '#1B3A6B' }}>
                         {CONTENT_TYPE_LABELS[entry.type] ?? entry.type}
                       </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{versions.length} files</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        hasMissingVersions ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {versions.length}{entry.type === 'blog-package' ? `/${totalExpected}` : ''} files{hasMissingVersions ? ' ⚠️' : ''}
+                      </span>
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">{entry.clientName} · {date}</div>
                   </div>
@@ -135,30 +313,71 @@ function HistoryTab({ user }: { user: User }) {
                 </div>
               </div>
 
-              {/* Expanded: per-version download buttons */}
-              {isExpanded && versions.length > 0 && (
-                <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
-                  <p className="text-xs text-gray-500 font-medium mb-2">Download individual files:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {versions.map(v => (
-                      <button
-                        key={v.key}
-                        onClick={async () => {
-                          try {
-                            await triggerDocxDownload(
-                              v.content,
-                              { clientName: entry.clientName, keyword: entry.keyword, version: v.label, date },
-                              v.fileSlug,
-                            );
-                          } catch (e) { alert('Download failed: ' + (e instanceof Error ? e.message : 'error')); }
-                        }}
-                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors"
-                      >
-                        ⬇ {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {/* Expanded: per-version downloads + recovery actions */}
+              {isExpanded && (
+                <>
+                  {versions.length > 0 && (
+                    <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+                      <p className="text-xs text-gray-500 font-medium mb-2">Download individual files:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {versions.map(v => (
+                          <button
+                            key={v.key}
+                            onClick={async () => {
+                              try {
+                                await triggerDocxDownload(
+                                  v.content,
+                                  { clientName: entry.clientName, keyword: entry.keyword, version: v.label, date },
+                                  v.fileSlug,
+                                );
+                              } catch (e) { alert('Download failed: ' + (e instanceof Error ? e.message : 'error')); }
+                            }}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors"
+                          >
+                            ⬇ {v.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recovery actions — blog-package only */}
+                  {entry.type === 'blog-package' && canEdit && (
+                    <div className="border-t border-yellow-100 px-4 py-3 bg-yellow-50">
+                      {isRegenerating ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <div className="animate-spin w-4 h-4 border-2 border-blue-200 rounded-full shrink-0" style={{ borderTopColor: '#1B3A6B' }} />
+                          {regenStatus}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-gray-500 font-medium mr-1">Recovery:</span>
+                          {hasMissingVersions && (
+                            <button
+                              onClick={() => handleRegenerate(entry, 'missing')}
+                              className="text-xs px-3 py-1.5 rounded-lg font-medium text-white"
+                              style={{ background: '#1B3A6B' }}
+                            >
+                              ↻ Regenerate Missing ({9 - versions.length})
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRegenerate(entry, 'all')}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+                          >
+                            ↺ Regenerate All 9
+                          </button>
+                          <button
+                            onClick={() => setAddVersionModal(entry.id)}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+                          >
+                            + Add Version
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );

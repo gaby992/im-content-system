@@ -54,6 +54,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
   const [results, setResults] = useState<GeneratedContent[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generatingStatus, setGeneratingStatus] = useState('');
+  const [generatingBlogPart, setGeneratingBlogPart] = useState<1 | 2 | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activeKeywordTab, setActiveKeywordTab] = useState(0);
   const [activeVersionTab, setActiveVersionTab] = useState<Record<number, number>>({});
@@ -116,6 +117,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     setGenerating(true);
     setResults([]);
     setErrors({});
+    setGeneratingBlogPart(null);
     setStep(4);
 
     const newResults: GeneratedContent[] = [];
@@ -125,51 +127,86 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     let updatedHistory = [...history];
 
     for (const keyword of validKeywords) {
-      try {
-        const result: GeneratedContent = {
-          keyword,
-          type: contentType,
-          clientName: selectedClient.name,
-          generatedAt: new Date().toISOString(),
-        };
+      const result: GeneratedContent = {
+        keyword,
+        type: contentType,
+        clientName: selectedClient.name,
+        generatedAt: new Date().toISOString(),
+      };
 
-        if (contentType === 'blog-package') {
-          setGeneratingStatus(`Generating "${keyword}" — Part 1 of 2 (Blog + WordPress + Blogger + Tumblr)...`);
+      if (contentType === 'blog-package') {
+        const partErrors: string[] = [];
+
+        // Part 1: Blog, WordPress, Blogger, Tumblr
+        try {
+          setGeneratingBlogPart(1);
+          setGeneratingStatus(`Generating "${keyword}" — Part 1 of 2... (Blog, WordPress, Blogger, Tumblr)`);
           const part1 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 1 });
           result.blog    = part1.blog;
           result.web20_1 = part1.web20_1;
           result.web20_2 = part1.web20_2;
           result.web20_3 = part1.web20_3;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Generation failed';
+          partErrors.push(`Part 1 (Blog, WordPress, Blogger, Tumblr) failed: ${msg}`);
+        }
 
-          setGeneratingStatus(`Generating "${keyword}" — Part 2 of 2 (Medium + Weebly + Wix + Drive + GBP)...`);
+        // Part 2: Medium, Weebly, Wix, Drive, GBP
+        try {
+          setGeneratingBlogPart(2);
+          setGeneratingStatus(`Generating "${keyword}" — Part 2 of 2... (Medium, Weebly, Wix, Drive, GBP)`);
           const part2 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 2 });
           result.web20_4 = part2.web20_4;
           result.web20_5 = part2.web20_5;
           result.web20_6 = part2.web20_6;
           result.drive   = part2.drive;
           result.gbp     = part2.gbp;
-        } else {
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Generation failed';
+          partErrors.push(`Part 2 (Medium, Weebly, Wix, Drive, GBP) failed: ${msg}`);
+        }
+
+        // Auto-save whatever was completed — never lose partial results
+        const hasAnyContent = result.blog || result.web20_1 || result.web20_2 || result.web20_3 ||
+                              result.web20_4 || result.web20_5 || result.web20_6 || result.drive || result.gbp;
+
+        if (hasAnyContent) {
+          newResults.push(result);
+          const entry: GenerationHistoryEntry = { id: generateId(), ...result };
+          updatedHistory = [
+            entry,
+            ...updatedHistory.filter(
+              h => !(h.clientName === result.clientName && h.keyword.toLowerCase() === result.keyword.toLowerCase())
+            ),
+          ];
+          setHistory(updatedHistory);
+          localStorage.setItem('im-generation-history', JSON.stringify(updatedHistory));
+        }
+
+        if (partErrors.length > 0) {
+          newErrors[keyword] = partErrors.join(' • ');
+        }
+      } else {
+        try {
           setGeneratingStatus(`Generating "${keyword}"...`);
           const data = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt });
           if (contentType === 'landing-page')  result.landingPage  = data.content;
           if (contentType === 'location-page') result.locationPage = data.content;
+
+          newResults.push(result);
+          const entry: GenerationHistoryEntry = { id: generateId(), ...result };
+          updatedHistory = [
+            entry,
+            ...updatedHistory.filter(
+              h => !(h.clientName === result.clientName && h.keyword.toLowerCase() === result.keyword.toLowerCase())
+            ),
+          ];
+          setHistory(updatedHistory);
+          localStorage.setItem('im-generation-history', JSON.stringify(updatedHistory));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Network error. Please try again.';
+          newErrors[keyword] = msg;
         }
-
-        newResults.push(result);
-
-        // Save / overwrite in history
-        const entry: GenerationHistoryEntry = { id: generateId(), ...result };
-        updatedHistory = [
-          entry,
-          ...updatedHistory.filter(
-            h => !(h.clientName === result.clientName && h.keyword.toLowerCase() === result.keyword.toLowerCase())
-          ),
-        ];
-        setHistory(updatedHistory);
-        localStorage.setItem('im-generation-history', JSON.stringify(updatedHistory));
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Network error. Please try again.';
-        newErrors[keyword] = msg;
       }
     }
 
@@ -177,6 +214,7 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     setErrors(newErrors);
     setGenerating(false);
     setGeneratingStatus('');
+    setGeneratingBlogPart(null);
     setActiveKeywordTab(0);
   }
 
@@ -383,7 +421,22 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
               <div className="animate-spin w-12 h-12 border-4 border-blue-200 rounded-full mx-auto mb-4" style={{ borderTopColor: '#1B3A6B' }} />
               <p className="text-gray-700 font-medium text-sm">{generatingStatus}</p>
-              <p className="text-gray-400 text-xs mt-2">Blog packages use 2 API calls to generate all 9 files.</p>
+              {contentType === 'blog-package' && (
+                <div className="mt-4 flex justify-center gap-2 flex-wrap">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    generatingBlogPart === 1 ? 'text-white' :
+                    generatingBlogPart === 2 ? 'bg-green-100 text-green-700' :
+                    'bg-gray-100 text-gray-400'
+                  }`} style={generatingBlogPart === 1 ? { background: '#1B3A6B' } : {}}>
+                    {generatingBlogPart === 2 ? '✓ ' : ''}Part 1: Blog, WordPress, Blogger, Tumblr
+                  </span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    generatingBlogPart === 2 ? 'text-white' : 'bg-gray-100 text-gray-400'
+                  }`} style={generatingBlogPart === 2 ? { background: '#1B3A6B' } : {}}>
+                    Part 2: Medium, Weebly, Wix, Drive, GBP
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -401,11 +454,19 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                 </div>
               )}
 
-              {Object.entries(errors).map(([kw, err]) => (
-                <div key={kw} className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                  <strong>{kw}:</strong> {err}
-                </div>
-              ))}
+              {Object.entries(errors).map(([kw, err]) => {
+                const hasPartialResult = results.some(r => r.keyword === kw);
+                return (
+                  <div key={kw} className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                    <strong>{kw}:</strong> {err}
+                    {hasPartialResult && (
+                      <span className="block mt-1 text-xs text-red-500">
+                        ⚠️ Partial content was saved to History. Use &quot;Regenerate Missing&quot; in the History tab to fill in the failed versions.
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
 
               {results[activeKeywordTab] && (() => {
                 const result = results[activeKeywordTab];
@@ -473,6 +534,12 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
                         <div className="p-6 prose max-w-none text-sm leading-relaxed overflow-y-auto"
                           style={{ maxHeight: '600px' }}
                           dangerouslySetInnerHTML={{ __html: currentVersion.content }} />
+                      </div>
+                    )}
+
+                    {result.type === 'blog-package' && versions.length < 9 && versions.length > 0 && (
+                      <div className="mx-4 mt-3 mb-1 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-700">
+                        ⚠️ {9 - versions.length} version{9 - versions.length !== 1 ? 's' : ''} missing. Go to <strong>Reports → History</strong> and use <strong>Regenerate Missing</strong> to fill them in.
                       </div>
                     )}
 

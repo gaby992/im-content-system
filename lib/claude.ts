@@ -46,7 +46,7 @@ export function buildPrompt(
   keyword: string,
   clientSystemPrompt: string
 ): { systemPrompt: string; userPrompt: string; maxTokens: number } {
-  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\n---\n\n${clientSystemPrompt}`;
+  const systemPrompt = `${MASTER_SYSTEM_PROMPT}\n\n---\n\nCLIENT CONTEXT:\n${clientSystemPrompt}\n\n---\n\nKEYWORD LOCATION RULE: The keyword you are given is your PRIMARY target. If the keyword includes a city, location, or geography, generate content specifically for THAT location — never substitute or override it with the client's configured cities. The client information above is background context only.`;
 
   if (contentType === 'blog-package-part1') {
     const userPrompt = `Create the FIRST HALF of a Blog Post Package for the keyword: "${keyword}"
