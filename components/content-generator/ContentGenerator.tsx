@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Client, ContentType, GeneratedContent, GenerationHistoryEntry } from '@/types';
 import { formatDate, generateId, getVersionsFromContent } from '@/lib/utils';
 import { triggerDocxDownload, downloadAllAsZip } from '@/lib/docx-generator';
-import { getClients, getHistory, upsertHistoryEntry, deleteHistoryByClientKeyword } from '@/lib/db';
+import { getClients, getHistory, upsertHistoryEntry, deleteHistoryByClientKeyword } from '@/lib/api';
 
 interface ContentGeneratorProps {
   user: { username: string; role: string };

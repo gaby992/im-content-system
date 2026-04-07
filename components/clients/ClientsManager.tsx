@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Client, User } from '@/types';
 import { generateSystemPromptFromClient } from '@/lib/utils';
-import { getClients, createClient, updateClient, deleteClient } from '@/lib/db';
+import { getClients, createClient, updateClient, deleteClient } from '@/lib/api';
 
 interface ClientsManagerProps {
   user: User;

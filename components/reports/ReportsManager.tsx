@@ -7,7 +7,7 @@ import {
   getHistory, updateHistoryEntry, deleteHistoryEntry,
   getFolders, createFolder, deleteFolder,
   getClients,
-} from '@/lib/db';
+} from '@/lib/api';
 
 const ALL_BLOG_VERSIONS: { key: keyof GenerationHistoryEntry; label: string; part: 1 | 2 }[] = [
   { key: 'blog',    label: 'Blog Post',        part: 1 },

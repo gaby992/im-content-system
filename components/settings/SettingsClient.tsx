@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { User } from '@/types';
 import { TEAM_CREDENTIALS } from '@/lib/constants';
-import { getApiKey, saveApiKey } from '@/lib/db';
+import { getApiKey, saveApiKey } from '@/lib/api';
 
 interface SettingsClientProps {
   user: User;

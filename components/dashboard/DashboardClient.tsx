@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Client, User } from '@/types';
-import { getClients, getFolders } from '@/lib/db';
+import { getClients, getFolders } from '@/lib/api';
 
 interface DashboardClientProps {
   user: User;
