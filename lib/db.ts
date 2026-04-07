@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { getSupabase } from './supabase';
 import { Client, ReportFolder, GenerationHistoryEntry } from '@/types';
 
 // ─── Clients ──────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ function clientToRow(client: Omit<Client, 'id' | 'createdAt'>) {
 }
 
 export async function getClients(): Promise<Client[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('clients')
     .select('*')
     .order('created_at', { ascending: true });
@@ -43,7 +43,7 @@ export async function getClients(): Promise<Client[]> {
 }
 
 export async function createClient(client: Omit<Client, 'id' | 'createdAt'>): Promise<Client> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('clients')
     .insert(clientToRow(client))
     .select()
@@ -53,7 +53,7 @@ export async function createClient(client: Omit<Client, 'id' | 'createdAt'>): Pr
 }
 
 export async function updateClient(id: string, client: Omit<Client, 'id' | 'createdAt'>): Promise<Client> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('clients')
     .update(clientToRow(client))
     .eq('id', id)
@@ -64,7 +64,7 @@ export async function updateClient(id: string, client: Omit<Client, 'id' | 'crea
 }
 
 export async function deleteClient(id: string): Promise<void> {
-  const { error } = await supabase.from('clients').delete().eq('id', id);
+  const { error } = await getSupabase().from('clients').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 
@@ -135,7 +135,7 @@ function historyEntryToRow(entry: GenerationHistoryEntry, clientId?: string) {
 }
 
 export async function getHistory(): Promise<GenerationHistoryEntry[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('generation_history')
     .select('*')
     .order('created_at', { ascending: false });
@@ -144,22 +144,22 @@ export async function getHistory(): Promise<GenerationHistoryEntry[]> {
 }
 
 export async function upsertHistoryEntry(entry: GenerationHistoryEntry): Promise<void> {
-  // Find matching client id if possible
-  const { data: clientRows } = await supabase
+  const sb = getSupabase();
+  const { data: clientRows } = await sb
     .from('clients')
     .select('id')
     .eq('name', entry.clientName)
     .single();
 
   const row = historyEntryToRow(entry, clientRows?.id);
-  const { error } = await supabase
+  const { error } = await sb
     .from('generation_history')
     .upsert(row, { onConflict: 'id' });
   if (error) throw new Error(error.message);
 }
 
 export async function deleteHistoryByClientKeyword(clientName: string, keyword: string): Promise<void> {
-  await supabase
+  await getSupabase()
     .from('generation_history')
     .delete()
     .eq('client_name', clientName)
@@ -168,7 +168,7 @@ export async function deleteHistoryByClientKeyword(clientName: string, keyword: 
 
 export async function updateHistoryEntry(id: string, entry: GenerationHistoryEntry): Promise<void> {
   const row = historyEntryToRow(entry);
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('generation_history')
     .update({
       content_versions: row.content_versions,
@@ -180,7 +180,7 @@ export async function updateHistoryEntry(id: string, entry: GenerationHistoryEnt
 }
 
 export async function deleteHistoryEntry(id: string): Promise<void> {
-  const { error } = await supabase.from('generation_history').delete().eq('id', id);
+  const { error } = await getSupabase().from('generation_history').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 
@@ -197,7 +197,7 @@ function rowToFolder(row: Record<string, unknown>): ReportFolder {
 }
 
 export async function getFolders(): Promise<ReportFolder[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('report_folders')
     .select('*')
     .order('created_at', { ascending: false });
@@ -206,7 +206,7 @@ export async function getFolders(): Promise<ReportFolder[]> {
 }
 
 export async function createFolder(folder: Omit<ReportFolder, 'id' | 'createdAt'>): Promise<ReportFolder> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('report_folders')
     .insert({
       month: folder.month,
@@ -220,14 +220,14 @@ export async function createFolder(folder: Omit<ReportFolder, 'id' | 'createdAt'
 }
 
 export async function deleteFolder(id: string): Promise<void> {
-  const { error } = await supabase.from('report_folders').delete().eq('id', id);
+  const { error } = await getSupabase().from('report_folders').delete().eq('id', id);
   if (error) throw new Error(error.message);
 }
 
 // ─── App Settings (API Key) ───────────────────────────────────────────────────
 
 export async function getApiKey(): Promise<string> {
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('app_settings')
     .select('value')
     .eq('key', 'claude_api_key')
@@ -236,7 +236,7 @@ export async function getApiKey(): Promise<string> {
 }
 
 export async function saveApiKey(value: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('app_settings')
     .upsert({ key: 'claude_api_key', value }, { onConflict: 'key' });
   if (error) throw new Error(error.message);
