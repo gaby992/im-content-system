@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { User } from '@/types';
 import { TEAM_CREDENTIALS } from '@/lib/constants';
+import { getApiKey, saveApiKey } from '@/lib/db';
 
 interface SettingsClientProps {
   user: User;
@@ -11,19 +12,29 @@ export default function SettingsClient({ user }: SettingsClientProps) {
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // Suppress unused variable warning — user prop available for future admin UI
   void user;
 
   useEffect(() => {
-    const stored = localStorage.getItem('im-api-key');
-    if (stored) setApiKey(stored);
+    getApiKey()
+      .then(key => setApiKey(key || ''))
+      .catch(err => console.error('Failed to load API key:', err))
+      .finally(() => setLoading(false));
   }, []);
 
-  function handleSave() {
-    localStorage.setItem('im-api-key', apiKey);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await saveApiKey(apiKey);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      alert('Failed to save API key: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -36,39 +47,46 @@ export default function SettingsClient({ user }: SettingsClientProps) {
       {/* API Key */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
         <h2 className="font-semibold text-gray-900 mb-1">Claude API Key</h2>
-        <p className="text-sm text-gray-500 mb-4">Required for content generation. Stored in your browser only.</p>
+        <p className="text-sm text-gray-500 mb-4">Required for content generation. Stored securely in the database.</p>
 
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"
-              placeholder="sk-ant-api..."
-            />
-            <button
-              type="button"
-              onClick={() => setShowKey(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
-            >
-              {showKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <button
-            onClick={handleSave}
-            className="px-5 py-2.5 rounded-lg text-white text-sm font-medium"
-            style={{ background: saved ? '#16a34a' : '#1B3A6B' }}
-          >
-            {saved ? '✓ Saved' : 'Save'}
-          </button>
-        </div>
+        {loading ? (
+          <div className="text-sm text-gray-400">Loading...</div>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 pr-16"
+                  placeholder="sk-ant-api..."
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                >
+                  {showKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2.5 rounded-lg text-white text-sm font-medium disabled:opacity-60"
+                style={{ background: saved ? '#16a34a' : '#1B3A6B' }}
+              >
+                {saved ? '✓ Saved' : saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
 
-        {apiKey && (
-          <div className="mt-3 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-xs text-green-600">API key configured</span>
-          </div>
+            {apiKey && (
+              <div className="mt-3 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500" />
+                <span className="text-xs text-green-600">API key configured</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 

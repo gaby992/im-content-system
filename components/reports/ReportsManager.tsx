@@ -1,8 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { ReportFolder, User, GenerationHistoryEntry } from '@/types';
-import { generateId, formatDate, getVersionsFromContent } from '@/lib/utils';
+import { formatDate, getVersionsFromContent } from '@/lib/utils';
 import { triggerDocxDownload, downloadAllAsZip } from '@/lib/docx-generator';
+import {
+  getHistory, updateHistoryEntry, deleteHistoryEntry,
+  getFolders, createFolder, deleteFolder,
+  getClients,
+} from '@/lib/db';
 
 const ALL_BLOG_VERSIONS: { key: keyof GenerationHistoryEntry; label: string; part: 1 | 2 }[] = [
   { key: 'blog',    label: 'Blog Post',        part: 1 },
@@ -20,7 +25,6 @@ const PART1_KEYS: (keyof GenerationHistoryEntry)[] = ['blog', 'web20_1', 'web20_
 const PART2_KEYS: (keyof GenerationHistoryEntry)[] = ['web20_4', 'web20_5', 'web20_6', 'drive', 'gbp'];
 
 async function callClaudeAPI(payload: {
-  apiKey: string;
   contentType: string;
   keyword: string;
   clientSystemPrompt: string;
@@ -56,28 +60,32 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 function HistoryTab({ user }: { user: User }) {
   const [history, setHistory] = useState<GenerationHistoryEntry[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string; niche: string; systemPrompt: string }[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filterClient, setFilterClient] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [zippingId, setZippingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [regenStatus, setRegenStatus] = useState('');
-  const [addVersionModal, setAddVersionModal] = useState<string | null>(null); // entry id
+  const [addVersionModal, setAddVersionModal] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem('im-generation-history');
-    if (stored) setHistory(JSON.parse(stored));
-    const storedClients = localStorage.getItem('im-clients');
-    if (storedClients) setClients(JSON.parse(storedClients));
+    Promise.all([getHistory(), getClients()])
+      .then(([hist, cls]) => {
+        setHistory(hist);
+        setClients(cls);
+      })
+      .catch(err => console.error('Failed to load history/clients:', err))
+      .finally(() => setLoading(false));
   }, []);
 
-  function saveHistory(updated: GenerationHistoryEntry[]) {
-    setHistory(updated);
-    localStorage.setItem('im-generation-history', JSON.stringify(updated));
-  }
-
-  function handleDelete(id: string) {
-    saveHistory(history.filter(h => h.id !== id));
+  async function handleDeleteEntry(id: string) {
+    try {
+      await deleteHistoryEntry(id);
+      setHistory(prev => prev.filter(h => h.id !== id));
+    } catch (err) {
+      alert('Failed to delete: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
     setDeleteConfirm(null);
     if (expandedId === id) setExpandedId(null);
   }
@@ -89,9 +97,6 @@ function HistoryTab({ user }: { user: User }) {
   }
 
   async function handleRegenerate(entry: GenerationHistoryEntry, mode: 'missing' | 'all') {
-    const apiKey = localStorage.getItem('im-api-key') || '';
-    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
-
     let clientSystemPrompt: string;
     try { clientSystemPrompt = getClientPrompt(entry.clientName); }
     catch (err) { alert(err instanceof Error ? err.message : 'Client not found'); return; }
@@ -105,7 +110,7 @@ function HistoryTab({ user }: { user: User }) {
     try {
       if (needPart1) {
         setRegenStatus('Regenerating Part 1 of 2... (Blog, WordPress, Blogger, Tumblr)');
-        const part1 = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 1 });
+        const part1 = await callClaudeAPI({ contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 1 });
         if (mode === 'all' || !updatedEntry.blog)    updatedEntry.blog    = part1.blog    ?? updatedEntry.blog;
         if (mode === 'all' || !updatedEntry.web20_1) updatedEntry.web20_1 = part1.web20_1 ?? updatedEntry.web20_1;
         if (mode === 'all' || !updatedEntry.web20_2) updatedEntry.web20_2 = part1.web20_2 ?? updatedEntry.web20_2;
@@ -113,7 +118,7 @@ function HistoryTab({ user }: { user: User }) {
       }
       if (needPart2) {
         setRegenStatus('Regenerating Part 2 of 2... (Medium, Weebly, Wix, Drive, GBP)');
-        const part2 = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 2 });
+        const part2 = await callClaudeAPI({ contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: 2 });
         if (mode === 'all' || !updatedEntry.web20_4) updatedEntry.web20_4 = part2.web20_4 ?? updatedEntry.web20_4;
         if (mode === 'all' || !updatedEntry.web20_5) updatedEntry.web20_5 = part2.web20_5 ?? updatedEntry.web20_5;
         if (mode === 'all' || !updatedEntry.web20_6) updatedEntry.web20_6 = part2.web20_6 ?? updatedEntry.web20_6;
@@ -121,7 +126,8 @@ function HistoryTab({ user }: { user: User }) {
         if (mode === 'all' || !updatedEntry.gbp)     updatedEntry.gbp     = part2.gbp     ?? updatedEntry.gbp;
       }
       updatedEntry.generatedAt = new Date().toISOString();
-      saveHistory(history.map(h => h.id === entry.id ? updatedEntry : h));
+      await updateHistoryEntry(entry.id, updatedEntry);
+      setHistory(prev => prev.map(h => h.id === entry.id ? updatedEntry : h));
     } catch (err) {
       alert(`Regeneration failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
@@ -131,9 +137,6 @@ function HistoryTab({ user }: { user: User }) {
   }
 
   async function handleAddVersion(entry: GenerationHistoryEntry, versionKey: keyof GenerationHistoryEntry) {
-    const apiKey = localStorage.getItem('im-api-key') || '';
-    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
-
     let clientSystemPrompt: string;
     try { clientSystemPrompt = getClientPrompt(entry.clientName); }
     catch (err) { alert(err instanceof Error ? err.message : 'Client not found'); return; }
@@ -145,9 +148,8 @@ function HistoryTab({ user }: { user: User }) {
     setRegenStatus(`Generating ${versionInfo.label}...`);
 
     try {
-      const data = await callClaudeAPI({ apiKey, contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: versionInfo.part });
+      const data = await callClaudeAPI({ contentType: entry.type, keyword: entry.keyword, clientSystemPrompt, blogPart: versionInfo.part });
       const updatedEntry = { ...entry };
-      // Only save the specifically requested version
       if (versionKey === 'blog'    && data.blog)    updatedEntry.blog    = data.blog;
       if (versionKey === 'web20_1' && data.web20_1) updatedEntry.web20_1 = data.web20_1;
       if (versionKey === 'web20_2' && data.web20_2) updatedEntry.web20_2 = data.web20_2;
@@ -157,7 +159,8 @@ function HistoryTab({ user }: { user: User }) {
       if (versionKey === 'web20_6' && data.web20_6) updatedEntry.web20_6 = data.web20_6;
       if (versionKey === 'drive'   && data.drive)   updatedEntry.drive   = data.drive;
       if (versionKey === 'gbp'     && data.gbp)     updatedEntry.gbp     = data.gbp;
-      saveHistory(history.map(h => h.id === entry.id ? updatedEntry : h));
+      await updateHistoryEntry(entry.id, updatedEntry);
+      setHistory(prev => prev.map(h => h.id === entry.id ? updatedEntry : h));
     } catch (err) {
       alert(`Failed to generate ${versionInfo.label}: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
@@ -167,13 +170,12 @@ function HistoryTab({ user }: { user: User }) {
   }
 
   const canEdit = user.role === 'admin' || user.role === 'editor';
-
   const uniqueClients = Array.from(new Set(history.map(h => h.clientName))).sort();
+  const filtered = history.filter(h => !filterClient || h.clientName === filterClient);
 
-  const filtered = history.filter(h => {
-    if (filterClient && h.clientName !== filterClient) return false;
-    return true;
-  });
+  if (loading) {
+    return <div className="text-center py-12 text-gray-400">Loading history...</div>;
+  }
 
   if (history.length === 0) {
     return (
@@ -260,7 +262,6 @@ function HistoryTab({ user }: { user: User }) {
 
           return (
             <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              {/* Row header */}
               <div className="flex items-center gap-3 px-4 py-3">
                 <button
                   className="flex-1 flex items-center gap-3 text-left min-w-0"
@@ -284,7 +285,6 @@ function HistoryTab({ user }: { user: User }) {
                 </button>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* ZIP download */}
                   <button
                     onClick={async () => {
                       setZippingId(entry.id);
@@ -299,11 +299,10 @@ function HistoryTab({ user }: { user: User }) {
                     {zippingId === entry.id ? '...' : '⬇ ZIP'}
                   </button>
 
-                  {/* Delete */}
                   {canEdit && (
                     deleteConfirm === entry.id ? (
                       <div className="flex gap-1">
-                        <button onClick={() => handleDelete(entry.id)} className="text-xs px-2 py-1 rounded bg-red-500 text-white">Delete</button>
+                        <button onClick={() => handleDeleteEntry(entry.id)} className="text-xs px-2 py-1 rounded bg-red-500 text-white">Delete</button>
                         <button onClick={() => setDeleteConfirm(null)} className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600">Cancel</button>
                       </div>
                     ) : (
@@ -313,7 +312,6 @@ function HistoryTab({ user }: { user: User }) {
                 </div>
               </div>
 
-              {/* Expanded: per-version downloads + recovery actions */}
               {isExpanded && (
                 <>
                   {versions.length > 0 && (
@@ -341,7 +339,6 @@ function HistoryTab({ user }: { user: User }) {
                     </div>
                   )}
 
-                  {/* Recovery actions — blog-package only */}
                   {entry.type === 'blog-package' && canEdit && (
                     <div className="border-t border-yellow-100 px-4 py-3 bg-yellow-50">
                       {isRegenerating ? (
@@ -397,35 +394,45 @@ function FoldersTab({ user }: { user: User }) {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [filterClient, setFilterClient] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const storedFolders = localStorage.getItem('im-report-folders');
-    if (storedFolders) setFolders(JSON.parse(storedFolders));
-    const storedClients = localStorage.getItem('im-clients');
-    if (storedClients) setClients(JSON.parse(storedClients));
+    Promise.all([getFolders(), getClients()])
+      .then(([flds, cls]) => {
+        setFolders(flds);
+        setClients(cls);
+      })
+      .catch(err => console.error('Failed to load folders/clients:', err))
+      .finally(() => setLoading(false));
   }, []);
 
-  function saveFolders(updated: ReportFolder[]) {
-    setFolders(updated);
-    localStorage.setItem('im-report-folders', JSON.stringify(updated));
-  }
-
-  function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const newFolder: ReportFolder = {
-      id: generateId(),
-      month: form.month,
-      clientName: form.clientName,
-      topic: form.topic,
-      createdAt: new Date().toISOString(),
-    };
-    saveFolders([...folders, newFolder]);
-    setShowForm(false);
-    setForm({ month: '', clientName: '', topic: '' });
+    setSaving(true);
+    try {
+      const newFolder = await createFolder({
+        month: form.month,
+        clientName: form.clientName,
+        topic: form.topic,
+      });
+      setFolders(prev => [newFolder, ...prev]);
+      setShowForm(false);
+      setForm({ month: '', clientName: '', topic: '' });
+    } catch (err) {
+      alert('Failed to create folder: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleDelete(id: string) {
-    saveFolders(folders.filter(f => f.id !== id));
+  async function handleDeleteFolder(id: string) {
+    try {
+      await deleteFolder(id);
+      setFolders(prev => prev.filter(f => f.id !== id));
+    } catch (err) {
+      alert('Failed to delete folder: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
     setDeleteConfirm(null);
   }
 
@@ -440,7 +447,7 @@ function FoldersTab({ user }: { user: User }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-gray-500">{folders.length} folder{folders.length !== 1 ? 's' : ''}</span>
+        <span className="text-sm text-gray-500">{loading ? '...' : `${folders.length} folder${folders.length !== 1 ? 's' : ''}`}</span>
         {canEdit && (
           <button onClick={() => setShowForm(true)} className="px-4 py-2 rounded-lg text-white font-medium text-sm" style={{ background: '#1B3A6B' }}>
             + New Folder
@@ -477,7 +484,9 @@ function FoldersTab({ user }: { user: User }) {
                   required placeholder="e.g. Acne Treatment Blog Posts" />
               </div>
               <div className="flex gap-3 pt-1">
-                <button type="submit" className="px-5 py-2 rounded-lg text-white text-sm font-medium" style={{ background: '#1B3A6B' }}>Create</button>
+                <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-white text-sm font-medium disabled:opacity-60" style={{ background: '#1B3A6B' }}>
+                  {saving ? 'Creating...' : 'Create'}
+                </button>
                 <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2 rounded-lg text-gray-600 text-sm border border-gray-300">Cancel</button>
               </div>
             </form>
@@ -497,7 +506,9 @@ function FoldersTab({ user }: { user: User }) {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-12 text-gray-400">Loading folders...</div>
+      ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <div className="text-5xl mb-4">📁</div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -518,7 +529,7 @@ function FoldersTab({ user }: { user: User }) {
                 {canEdit && (
                   deleteConfirm === folder.id ? (
                     <div className="flex gap-1">
-                      <button onClick={() => handleDelete(folder.id)} className="text-xs px-2 py-1 rounded bg-red-500 text-white">Delete</button>
+                      <button onClick={() => handleDeleteFolder(folder.id)} className="text-xs px-2 py-1 rounded bg-red-500 text-white">Delete</button>
                       <button onClick={() => setDeleteConfirm(null)} className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-600">Cancel</button>
                     </div>
                   ) : (
@@ -552,7 +563,6 @@ export default function ReportsManager({ user }: ReportsManagerProps) {
         <p className="text-gray-500 text-sm mt-1">Generation history and report folders</p>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-gray-200">
         {([
           { id: 'history', label: '📋 History' },

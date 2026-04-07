@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Client, ContentType, GeneratedContent, GenerationHistoryEntry } from '@/types';
-import { slugify, formatDate, generateId, getVersionsFromContent } from '@/lib/utils';
+import { formatDate, generateId, getVersionsFromContent } from '@/lib/utils';
 import { triggerDocxDownload, downloadAllAsZip } from '@/lib/docx-generator';
+import { getClients, getHistory, upsertHistoryEntry, deleteHistoryByClientKeyword } from '@/lib/db';
 
 interface ContentGeneratorProps {
   user: { username: string; role: string };
@@ -30,7 +31,6 @@ const CONTENT_TYPES = [
 ];
 
 async function callClaudeAPI(payload: {
-  apiKey: string;
   contentType: ContentType;
   keyword: string;
   clientSystemPrompt: string;
@@ -67,10 +67,12 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
   void user;
 
   useEffect(() => {
-    const stored = localStorage.getItem('im-clients');
-    if (stored) setClients(JSON.parse(stored));
-    const hist = localStorage.getItem('im-generation-history');
-    if (hist) setHistory(JSON.parse(hist));
+    getClients()
+      .then(setClients)
+      .catch(err => console.error('Failed to load clients:', err));
+    getHistory()
+      .then(setHistory)
+      .catch(err => console.error('Failed to load history:', err));
   }, []);
 
   function findHistoryEntry(keyword: string, clientName: string): GenerationHistoryEntry | undefined {
@@ -88,7 +90,6 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     const validKeywords = keywords.filter(k => k.trim());
     if (validKeywords.length === 0) return;
 
-    // Check for duplicates
     const dups = validKeywords
       .map(kw => ({ keyword: kw, entry: findHistoryEntry(kw, selectedClient.name) }))
       .filter((d): d is { keyword: string; entry: GenerationHistoryEntry } => !!d.entry)
@@ -108,8 +109,6 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     setDuplicateWarning([]);
 
     if (!selectedClient) return;
-    const apiKey = localStorage.getItem('im-api-key') || '';
-    if (!apiKey) { alert('Please add your Claude API key in Settings first.'); return; }
 
     const validKeywords = keywords.filter(k => k.trim());
     if (validKeywords.length === 0) return;
@@ -124,8 +123,6 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
     const newErrors: Record<string, string> = {};
     const clientSystemPrompt = selectedClient.systemPrompt || `You are creating content for ${selectedClient.name}, a ${selectedClient.niche} business.`;
 
-    let updatedHistory = [...history];
-
     for (const keyword of validKeywords) {
       const result: GeneratedContent = {
         keyword,
@@ -137,11 +134,10 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
       if (contentType === 'blog-package') {
         const partErrors: string[] = [];
 
-        // Part 1: Blog, WordPress, Blogger, Tumblr
         try {
           setGeneratingBlogPart(1);
           setGeneratingStatus(`Generating "${keyword}" — Part 1 of 2... (Blog, WordPress, Blogger, Tumblr)`);
-          const part1 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 1 });
+          const part1 = await callClaudeAPI({ contentType, keyword, clientSystemPrompt, blogPart: 1 });
           result.blog    = part1.blog;
           result.web20_1 = part1.web20_1;
           result.web20_2 = part1.web20_2;
@@ -151,11 +147,10 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           partErrors.push(`Part 1 (Blog, WordPress, Blogger, Tumblr) failed: ${msg}`);
         }
 
-        // Part 2: Medium, Weebly, Wix, Drive, GBP
         try {
           setGeneratingBlogPart(2);
           setGeneratingStatus(`Generating "${keyword}" — Part 2 of 2... (Medium, Weebly, Wix, Drive, GBP)`);
-          const part2 = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt, blogPart: 2 });
+          const part2 = await callClaudeAPI({ contentType, keyword, clientSystemPrompt, blogPart: 2 });
           result.web20_4 = part2.web20_4;
           result.web20_5 = part2.web20_5;
           result.web20_6 = part2.web20_6;
@@ -166,21 +161,19 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
           partErrors.push(`Part 2 (Medium, Weebly, Wix, Drive, GBP) failed: ${msg}`);
         }
 
-        // Auto-save whatever was completed — never lose partial results
         const hasAnyContent = result.blog || result.web20_1 || result.web20_2 || result.web20_3 ||
                               result.web20_4 || result.web20_5 || result.web20_6 || result.drive || result.gbp;
 
         if (hasAnyContent) {
           newResults.push(result);
           const entry: GenerationHistoryEntry = { id: generateId(), ...result };
-          updatedHistory = [
+          // Remove old duplicate entry if exists, then upsert new
+          await deleteHistoryByClientKeyword(entry.clientName, entry.keyword).catch(() => {});
+          await upsertHistoryEntry(entry).catch(err => console.error('Failed to save history:', err));
+          setHistory(prev => [
             entry,
-            ...updatedHistory.filter(
-              h => !(h.clientName === result.clientName && h.keyword.toLowerCase() === result.keyword.toLowerCase())
-            ),
-          ];
-          setHistory(updatedHistory);
-          localStorage.setItem('im-generation-history', JSON.stringify(updatedHistory));
+            ...prev.filter(h => !(h.clientName === entry.clientName && h.keyword.toLowerCase() === entry.keyword.toLowerCase())),
+          ]);
         }
 
         if (partErrors.length > 0) {
@@ -189,20 +182,18 @@ export default function ContentGenerator({ user }: ContentGeneratorProps) {
       } else {
         try {
           setGeneratingStatus(`Generating "${keyword}"...`);
-          const data = await callClaudeAPI({ apiKey, contentType, keyword, clientSystemPrompt });
+          const data = await callClaudeAPI({ contentType, keyword, clientSystemPrompt });
           if (contentType === 'landing-page')  result.landingPage  = data.content;
           if (contentType === 'location-page') result.locationPage = data.content;
 
           newResults.push(result);
           const entry: GenerationHistoryEntry = { id: generateId(), ...result };
-          updatedHistory = [
+          await deleteHistoryByClientKeyword(entry.clientName, entry.keyword).catch(() => {});
+          await upsertHistoryEntry(entry).catch(err => console.error('Failed to save history:', err));
+          setHistory(prev => [
             entry,
-            ...updatedHistory.filter(
-              h => !(h.clientName === result.clientName && h.keyword.toLowerCase() === result.keyword.toLowerCase())
-            ),
-          ];
-          setHistory(updatedHistory);
-          localStorage.setItem('im-generation-history', JSON.stringify(updatedHistory));
+            ...prev.filter(h => !(h.clientName === entry.clientName && h.keyword.toLowerCase() === entry.keyword.toLowerCase())),
+          ]);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : 'Network error. Please try again.';
           newErrors[keyword] = msg;

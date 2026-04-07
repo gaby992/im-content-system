@@ -1,20 +1,21 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { buildPrompt, parseBlogPackage } from '@/lib/claude';
+import { getApiKey } from '@/lib/db';
 import { ContentType } from '@/types';
 
 export async function POST(request: Request) {
   try {
-    const { apiKey, contentType, keyword, clientSystemPrompt, blogPart } = await request.json() as {
-      apiKey: string;
+    const { contentType, keyword, clientSystemPrompt, blogPart } = await request.json() as {
       contentType: ContentType;
       keyword: string;
       clientSystemPrompt: string;
       blogPart?: 1 | 2;
     };
 
+    const apiKey = await getApiKey();
     if (!apiKey) {
-      return NextResponse.json({ error: 'API key is required. Please add it in Settings.' }, { status: 400 });
+      return NextResponse.json({ error: 'API key not configured. Please add it in Settings.' }, { status: 400 });
     }
 
     if (!keyword || !contentType || !clientSystemPrompt) {
@@ -23,7 +24,6 @@ export async function POST(request: Request) {
 
     const client = new Anthropic({ apiKey });
 
-    // For blog-package, use split prompts to stay within the model's 8192 output token limit
     const effectiveType = contentType === 'blog-package' && blogPart
       ? (`blog-package-part${blogPart}` as const)
       : contentType;

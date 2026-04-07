@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Client, User } from '@/types';
-import { generateId, generateSystemPromptFromClient } from '@/lib/utils';
+import { generateSystemPromptFromClient } from '@/lib/utils';
+import { getClients, createClient, updateClient, deleteClient } from '@/lib/db';
 
 interface ClientsManagerProps {
   user: User;
@@ -21,20 +22,19 @@ const emptyClient = {
 
 export default function ClientsManager({ user }: ClientsManagerProps) {
   const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [form, setForm] = useState(emptyClient);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem('im-clients');
-    if (stored) setClients(JSON.parse(stored));
+    getClients()
+      .then(setClients)
+      .catch(err => console.error('Failed to load clients:', err))
+      .finally(() => setLoading(false));
   }, []);
-
-  function saveClients(updated: Client[]) {
-    setClients(updated);
-    localStorage.setItem('im-clients', JSON.stringify(updated));
-  }
 
   function handleNew() {
     setForm(emptyClient);
@@ -58,9 +58,13 @@ export default function ClientsManager({ user }: ClientsManagerProps) {
     setShowForm(true);
   }
 
-  function handleDelete(id: string) {
-    const updated = clients.filter(c => c.id !== id);
-    saveClients(updated);
+  async function handleDelete(id: string) {
+    try {
+      await deleteClient(id);
+      setClients(prev => prev.filter(c => c.id !== id));
+    } catch (err) {
+      alert('Failed to delete client: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
     setDeleteConfirm(null);
   }
 
@@ -69,24 +73,25 @@ export default function ClientsManager({ user }: ClientsManagerProps) {
     setForm(prev => ({ ...prev, systemPrompt: prompt }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (editingClient) {
-      const updated = clients.map(c =>
-        c.id === editingClient.id ? { ...editingClient, ...form } : c
-      );
-      saveClients(updated);
-    } else {
-      const newClient: Client = {
-        id: generateId(),
-        ...form,
-        createdAt: new Date().toISOString(),
-      };
-      saveClients([...clients, newClient]);
+    setSaving(true);
+    try {
+      if (editingClient) {
+        const updated = await updateClient(editingClient.id, form);
+        setClients(prev => prev.map(c => c.id === editingClient.id ? updated : c));
+      } else {
+        const newClient = await createClient(form);
+        setClients(prev => [...prev, newClient]);
+      }
+      setShowForm(false);
+      setEditingClient(null);
+      setForm(emptyClient);
+    } catch (err) {
+      alert('Failed to save client: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
-    setEditingClient(null);
-    setForm(emptyClient);
   }
 
   const canEdit = user.role === 'admin' || user.role === 'editor';
@@ -215,10 +220,11 @@ export default function ClientsManager({ user }: ClientsManagerProps) {
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-lg text-white font-medium text-sm"
+              disabled={saving}
+              className="px-6 py-2.5 rounded-lg text-white font-medium text-sm disabled:opacity-60"
               style={{ background: '#1B3A6B' }}
             >
-              {editingClient ? 'Save Changes' : 'Create Client'}
+              {saving ? 'Saving...' : (editingClient ? 'Save Changes' : 'Create Client')}
             </button>
             <button
               type="button"
@@ -238,7 +244,7 @@ export default function ClientsManager({ user }: ClientsManagerProps) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-gray-500 text-sm mt-1">{clients.length} client{clients.length !== 1 ? 's' : ''}</p>
+          <p className="text-gray-500 text-sm mt-1">{loading ? '...' : `${clients.length} client${clients.length !== 1 ? 's' : ''}`}</p>
         </div>
         {canEdit && (
           <button
@@ -251,7 +257,9 @@ export default function ClientsManager({ user }: ClientsManagerProps) {
         )}
       </div>
 
-      {clients.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-12 text-gray-400">Loading clients...</div>
+      ) : clients.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
           <div className="text-5xl mb-4">👥</div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">No clients yet</h3>

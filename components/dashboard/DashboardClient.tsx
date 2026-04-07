@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Client } from '@/types';
-import { User } from '@/types';
+import { Client, User } from '@/types';
+import { getClients, getFolders } from '@/lib/db';
 
 interface DashboardClientProps {
   user: User;
@@ -9,18 +9,20 @@ interface DashboardClientProps {
 
 export default function DashboardClient({ user }: DashboardClientProps) {
   const [clients, setClients] = useState<Client[]>([]);
-  const [folders, setFolders] = useState<{ id: string; month: string; clientName: string; topic: string }[]>([]);
+  const [folderCount, setFolderCount] = useState(0);
 
   useEffect(() => {
-    const storedClients = localStorage.getItem('im-clients');
-    if (storedClients) setClients(JSON.parse(storedClients));
-    const storedFolders = localStorage.getItem('im-report-folders');
-    if (storedFolders) setFolders(JSON.parse(storedFolders));
+    getClients()
+      .then(setClients)
+      .catch(err => console.error('Failed to load clients:', err));
+    getFolders()
+      .then(folders => setFolderCount(folders.length))
+      .catch(err => console.error('Failed to load folders:', err));
   }, []);
 
   const stats = [
     { label: 'Total Clients', value: clients.length, icon: '👥', color: '#1B3A6B' },
-    { label: 'Report Folders', value: folders.length, icon: '📁', color: '#C9A84C' },
+    { label: 'Report Folders', value: folderCount, icon: '📁', color: '#C9A84C' },
     { label: 'Active Sessions', value: 1, icon: '🟢', color: '#16a34a' },
     { label: 'Role', value: user.role.charAt(0).toUpperCase() + user.role.slice(1), icon: '👤', color: '#6366f1' },
   ];
